@@ -62,11 +62,14 @@ This direct feedback loop helps AI assistants like Claude understand what works 
 
 - [Godot Engine](https://godotengine.org/download) installed on your system
 - Node.js and npm
-- An AI assistant that supports MCP
+- An AI assistant that supports MCP (Cline, Cursor, etc.)
 
-## Installation
+## Installation and Configuration
 
-1. Clone the repository and install dependencies:
+### Step 1: Install and Build
+
+First, clone the repository and build the MCP server:
+
 ```bash
 git clone https://github.com/Coding-Solo/godot-mcp.git
 cd godot-mcp
@@ -74,7 +77,9 @@ npm install
 npm run build
 ```
 
-2. Configure with Cline:
+### Step 2: Configure with Your AI Assistant
+
+#### Option A: Configure with Cline
 
 Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`):
 
@@ -83,7 +88,7 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
   "mcpServers": {
     "godot": {
       "command": "node",
-      "args": ["/path/to/godot-mcp/build/index.js"],
+      "args": ["/absolute/path/to/godot-mcp/build/index.js"],
       "disabled": false,
       "autoApprove": [
         "launch_editor",
@@ -99,25 +104,52 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
 }
 ```
 
-## Configuration
+#### Option B: Configure with Cursor
 
-Configure using environment variables:
+**Using the Cursor UI:**
+
+1. Go to **Cursor Settings** > **Features** > **MCP**
+2. Click on the **+ Add New MCP Server** button
+3. Fill out the form:
+   - Name: `godot` (or any name you prefer)
+   - Type: `command`
+   - Command: `node /absolute/path/to/godot-mcp/build/index.js`
+4. Click "Add"
+5. You may need to press the refresh button in the top right corner of the MCP server card to populate the tool list
+
+**Using Project-Specific Configuration:**
+
+Create a file at `.cursor/mcp.json` in your project directory with the following content:
+
+```json
+{
+  "mcpServers": {
+    "godot": {
+      "command": "node",
+      "args": ["/absolute/path/to/godot-mcp/build/index.js"]
+    }
+  }
+}
+```
+
+### Step 3: Optional Environment Variables
+
+You can customize the server behavior with these environment variables:
 - `GODOT_PATH`: Path to the Godot executable (overrides automatic detection)
 - `DEBUG`: Set to "true" to enable debug logging
 
-## Using with Cline
+## Example Prompts
 
-Cline provides seamless integration with Godot MCP, allowing you to:
-
-1. **Analyze Godot Projects**: Ask Cline to examine your project structure and suggest improvements
-2. **Debug Assistance**: Share error output with Cline to get help debugging issues
-3. **Code Generation**: Request Cline to generate GDScript code for specific game mechanics
-4. **Interactive Development**: Have Cline run your project and provide real-time feedback
-
-### Example Prompts
+Once configured, your AI assistant will automatically run the MCP server when needed. You can use prompts like:
 
 ```
-"Can you analyze my Godot project structure and suggest improvements?"
+"Launch the Godot editor for my project at /path/to/project"
+
+"Run my Godot project and show me any errors"
+
+"Get information about my Godot project structure"
+
+"Analyze my Godot project structure and suggest improvements"
 
 "Help me debug this error in my Godot project: [paste error]"
 
@@ -129,6 +161,10 @@ Cline provides seamless integration with Godot MCP, allowing you to:
 - **Godot Not Found**: Set the GODOT_PATH environment variable to your Godot executable
 - **Connection Issues**: Ensure the server is running and restart your AI assistant
 - **Invalid Project Path**: Ensure the path points to a directory containing a project.godot file
+- **For Cursor Specifically**:
+-   Ensure the MCP server shows up and is enabled in Cursor settings (Settings > MCP)
+-   MCP tools can only be run using the Agent chat profile (Cursor Pro or Business subscription)
+-   Use "Yolo Mode" to automatically run MCP tool requests
 
 ## License
 
