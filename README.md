@@ -105,6 +105,58 @@ Configure using environment variables:
 - `GODOT_PATH`: Path to the Godot executable (overrides automatic detection)
 - `DEBUG`: Set to "true" to enable debug logging
 
+## Configuration with Cursor
+
+### Method 1: Using the Cursor UI
+
+1. Build the MCP server:
+```bash
+git clone https://github.com/Coding-Solo/godot-mcp.git
+cd godot-mcp
+npm install
+npm run build
+```
+
+2. Add the MCP server to Cursor:
+   - Go to `Cursor Settings` > `Features` > `MCP`
+   - Click on the `+ Add New MCP Server` button
+   - Fill out the form:
+     - Name: `godot` (or any name you prefer)
+     - Type: `stdio`
+     - Command: `node /absolute/path/to/godot-mcp/build/index.js`
+   - Click "Add"
+   - You may need to press the refresh button in the top right corner of the MCP server card to populate the tool list
+
+### Method 2: Using Project-Specific Configuration
+
+Create a file at `.cursor/mcp.json` in your project directory with the following content:
+
+```json
+{
+  "mcpServers": {
+    "godot": {
+      "command": "node",
+      "args": ["/absolute/path/to/godot-mcp/build/index.js"]
+    }
+  }
+}
+```
+
+### Using with Cursor
+
+Once configured, you can use Cursor's Agent to interact with the Godot MCP server. The Agent will automatically use the MCP tools when relevant, or you can explicitly instruct it to use specific Godot tools.
+
+Example prompts:
+```
+"Launch the Godot editor for my project at /path/to/project"
+
+"Run my Godot project and show me any errors"
+
+"Get information about my Godot project structure"
+```
+
+For more information on using MCP with Cursor, see the [official documentation](https://docs.cursor.com/context/model-context-protocol).
+
 ## Using with Cline
 
 Cline provides seamless integration with Godot MCP, allowing you to:
