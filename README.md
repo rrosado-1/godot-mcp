@@ -161,6 +161,10 @@ Once configured, your AI assistant will automatically run the MCP server when ne
 - **Godot Not Found**: Set the GODOT_PATH environment variable to your Godot executable
 - **Connection Issues**: Ensure the server is running and restart your AI assistant
 - **Invalid Project Path**: Ensure the path points to a directory containing a project.godot file
+- **For Cursor Specifically**:
+-   Ensure the MCP server shows up and is enabled in the MCP server settings
+-   MCP tools can only be run using the Agent chat profile (Cursor Pro or Business subscription)
+-   Use "Yolo Mode" to automatically run MCP tool requests
 
 ## License
 
