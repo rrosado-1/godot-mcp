@@ -18,8 +18,10 @@ import {
 import { spawn } from 'child_process';
 import { promisify } from 'util';
 import { exec } from 'child_process';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 
 const execAsync = promisify(exec);
 
@@ -314,6 +316,141 @@ class GodotServer {
             required: ['projectPath'],
           },
         },
+        {
+          name: 'create_scene',
+          description: 'Create a new Godot scene file',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              scenePath: {
+                type: 'string',
+                description: 'Path where the scene file will be saved (relative to project)',
+              },
+              rootNodeType: {
+                type: 'string',
+                description: 'Type of the root node (e.g., Node2D, Node3D)',
+                default: 'Node2D',
+              },
+            },
+            required: ['projectPath', 'scenePath'],
+          },
+        },
+        {
+          name: 'add_node',
+          description: 'Add a node to an existing scene',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              scenePath: {
+                type: 'string',
+                description: 'Path to the scene file (relative to project)',
+              },
+              parentNodePath: {
+                type: 'string',
+                description: 'Path to the parent node (e.g., "root" or "root/Player")',
+                default: 'root',
+              },
+              nodeType: {
+                type: 'string',
+                description: 'Type of node to add (e.g., Sprite2D, CollisionShape2D)',
+              },
+              nodeName: {
+                type: 'string',
+                description: 'Name for the new node',
+              },
+              properties: {
+                type: 'object',
+                description: 'Optional properties to set on the node',
+              },
+            },
+            required: ['projectPath', 'scenePath', 'nodeType', 'nodeName'],
+          },
+        },
+        {
+          name: 'load_sprite',
+          description: 'Load a sprite into a Sprite2D node',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              scenePath: {
+                type: 'string',
+                description: 'Path to the scene file (relative to project)',
+              },
+              nodePath: {
+                type: 'string',
+                description: 'Path to the Sprite2D node (e.g., "root/Player/Sprite2D")',
+              },
+              texturePath: {
+                type: 'string',
+                description: 'Path to the texture file (relative to project)',
+              },
+            },
+            required: ['projectPath', 'scenePath', 'nodePath', 'texturePath'],
+          },
+        },
+        {
+          name: 'export_mesh_library',
+          description: 'Export a scene as a MeshLibrary resource',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              scenePath: {
+                type: 'string',
+                description: 'Path to the scene file (.tscn) to export',
+              },
+              outputPath: {
+                type: 'string',
+                description: 'Path where the mesh library (.res) will be saved',
+              },
+              meshItemNames: {
+                type: 'array',
+                items: {
+                  type: 'string'
+                },
+                description: 'Optional: Names of specific mesh items to include (defaults to all)',
+              },
+            },
+            required: ['projectPath', 'scenePath', 'outputPath'],
+          },
+        },
+        {
+          name: 'save_scene',
+          description: 'Save changes to a scene file',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              scenePath: {
+                type: 'string',
+                description: 'Path to the scene file (relative to project)',
+              },
+              newPath: {
+                type: 'string',
+                description: 'Optional: New path to save the scene to (for creating variants)',
+              },
+            },
+            required: ['projectPath', 'scenePath'],
+          },
+        },
       ],
     }));
 
@@ -335,6 +472,16 @@ class GodotServer {
           return await this.handleListProjects(request.params.arguments);
         case 'get_project_info':
           return await this.handleGetProjectInfo(request.params.arguments);
+        case 'create_scene':
+          return await this.handleCreateScene(request.params.arguments);
+        case 'add_node':
+          return await this.handleAddNode(request.params.arguments);
+        case 'load_sprite':
+          return await this.handleLoadSprite(request.params.arguments);
+        case 'export_mesh_library':
+          return await this.handleExportMeshLibrary(request.params.arguments);
+        case 'save_scene':
+          return await this.handleSaveScene(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -458,7 +605,7 @@ class GodotServer {
         const lines = data.toString().split('\n');
         output.push(...lines);
         if (this.debugMode) {
-          lines.forEach(line => {
+          lines.forEach((line: string) => {
             if (line.trim()) this.logDebug(`[Godot stdout] ${line}`);
           });
         }
@@ -468,7 +615,7 @@ class GodotServer {
         const lines = data.toString().split('\n');
         errors.push(...lines);
         if (this.debugMode) {
-          lines.forEach(line => {
+          lines.forEach((line: string) => {
             if (line.trim()) this.logDebug(`[Godot stderr] ${line}`);
           });
         }
@@ -844,6 +991,763 @@ class GodotServer {
     }
   }
 
+
+  /**
+   * Create a temporary GDScript file
+   * @param content The GDScript content
+   * @returns Path to the temporary file
+   */
+  private createTempGDScript(content: string): string {
+    const tempDir = tmpdir();
+    const scriptId = randomUUID();
+    const scriptPath = join(tempDir, `godot_mcp_${scriptId}.gd`);
+    
+    this.logDebug(`Creating temporary GDScript at: ${scriptPath}`);
+    writeFileSync(scriptPath, content);
+    
+    return scriptPath;
+  }
+
+  /**
+   * Execute a GDScript file with Godot
+   * @param scriptPath Path to the GDScript file
+   * @param projectPath Path to the Godot project
+   * @returns Output from Godot
+   */
+  private async executeGDScript(scriptPath: string, projectPath: string): Promise<{stdout: string, stderr: string}> {
+    this.logDebug(`Executing GDScript: ${scriptPath} in project: ${projectPath}`);
+    
+    try {
+      const { stdout, stderr } = await execAsync(
+        `"${this.godotPath}" --headless --script "${scriptPath}" --path "${projectPath}"`
+      );
+      
+      return { stdout, stderr };
+    } catch (error: any) {
+      // If execAsync throws, it still contains stdout/stderr
+      if (error.stdout !== undefined && error.stderr !== undefined) {
+        return { 
+          stdout: error.stdout,
+          stderr: error.stderr
+        };
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Handle the create_scene tool
+   * @param args Tool arguments
+   */
+  private async handleCreateScene(args: any) {
+    if (!args.projectPath) {
+      return this.createErrorResponse(
+        'Project path is required',
+        ['Provide a valid path to a Godot project directory']
+      );
+    }
+
+    if (!args.scenePath) {
+      return this.createErrorResponse(
+        'Scene path is required',
+        ['Provide a valid path where the scene file will be saved']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.scenePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Set default root node type if not provided
+      const rootNodeType = args.rootNodeType || 'Node2D';
+      
+      // Create the directory for the scene if it doesn't exist
+      const sceneDir = dirname(join(args.projectPath, args.scenePath));
+      if (!existsSync(sceneDir)) {
+        this.logDebug(`Creating directory: ${sceneDir}`);
+        mkdirSync(sceneDir, { recursive: true });
+      }
+
+      // Create GDScript to create the scene
+      const scriptContent = `
+#!/usr/bin/env -S godot --headless --script
+extends SceneTree
+
+func _init():
+    print("Creating scene: ${args.scenePath}")
+    
+    # Create the root node
+    var root = ${rootNodeType}.new()
+    root.name = "root"
+    
+    # Create a packed scene
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(root)
+    if result == OK:
+        # Save the scene
+        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
+        if error == OK:
+            print("Scene created successfully at: ${args.scenePath}")
+        else:
+            printerr("Failed to save scene: " + str(error))
+    else:
+        printerr("Failed to pack scene: " + str(result))
+    
+    quit()
+`;
+
+      const scriptPath = this.createTempGDScript(scriptContent);
+      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to create scene: ${stderr}`,
+          [
+            'Check if the root node type is valid',
+            'Ensure you have write permissions to the scene path',
+            'Verify the scene path is valid'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Scene created successfully at: ${args.scenePath}\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to create scene: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the add_node tool
+   * @param args Tool arguments
+   */
+  private async handleAddNode(args: any) {
+    if (!args.projectPath || !args.scenePath || !args.nodeType || !args.nodeName) {
+      return this.createErrorResponse(
+        'Missing required parameters',
+        ['Provide projectPath, scenePath, nodeType, and nodeName']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.scenePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Check if the scene file exists
+      const scenePath = join(args.projectPath, args.scenePath);
+      if (!existsSync(scenePath)) {
+        return this.createErrorResponse(
+          `Scene file does not exist: ${args.scenePath}`,
+          [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first'
+          ]
+        );
+      }
+
+      // Set default parent node path if not provided
+      const parentNodePath = args.parentNodePath || 'root';
+      
+      // Convert properties object to JSON string if provided
+      let propertiesJson = '{}';
+      if (args.properties) {
+        propertiesJson = JSON.stringify(args.properties);
+      }
+
+      // Create GDScript to add the node
+      const scriptContent = `
+#!/usr/bin/env -S godot --headless --script
+extends SceneTree
+
+func _init():
+    print("Adding node to scene: ${args.scenePath}")
+    
+    # Load the scene
+    var scene = load("${args.scenePath}")
+    if not scene:
+        printerr("Failed to load scene: ${args.scenePath}")
+        quit(1)
+    
+    # Instance the scene
+    var root = scene.instantiate()
+    
+    # Find the parent node
+    var parent = root
+    if "${parentNodePath}" != "root":
+        parent = root.get_node("${parentNodePath.replace('root/', '')}")
+        if not parent:
+            printerr("Parent node not found: ${parentNodePath}")
+            quit(1)
+    
+    # Create the new node
+    var new_node
+    
+    # Try to create the node
+    try:
+        new_node = ${args.nodeType}.new()
+    except:
+        printerr("Failed to create node of type: ${args.nodeType}")
+        printerr("This node type may not exist or may not be instantiable")
+        quit(1)
+    
+    new_node.name = "${args.nodeName}"
+    
+    # Set properties if provided
+    var properties = ${propertiesJson}
+    for property in properties:
+        if new_node.get("property") != null:  # Check if property exists
+            new_node.set(property, properties[property])
+    
+    # Add the node to the parent
+    parent.add_child(new_node)
+    new_node.owner = root
+    
+    # Save the modified scene
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(root)
+    if result == OK:
+        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
+        if error == OK:
+            print("Node '${args.nodeName}' of type '${args.nodeType}' added successfully")
+        else:
+            printerr("Failed to save scene: " + str(error))
+    else:
+        printerr("Failed to pack scene: " + str(result))
+    
+    quit()
+`;
+
+      const scriptPath = this.createTempGDScript(scriptContent);
+      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to add node: ${stderr}`,
+          [
+            'Check if the node type is valid',
+            'Ensure the parent node path exists',
+            'Verify the scene file is valid'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Node '${args.nodeName}' of type '${args.nodeType}' added successfully to '${args.scenePath}'.\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to add node: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the load_sprite tool
+   * @param args Tool arguments
+   */
+  private async handleLoadSprite(args: any) {
+    if (!args.projectPath || !args.scenePath || !args.nodePath || !args.texturePath) {
+      return this.createErrorResponse(
+        'Missing required parameters',
+        ['Provide projectPath, scenePath, nodePath, and texturePath']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.scenePath) || 
+        !this.validatePath(args.nodePath) || !this.validatePath(args.texturePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Check if the scene file exists
+      const scenePath = join(args.projectPath, args.scenePath);
+      if (!existsSync(scenePath)) {
+        return this.createErrorResponse(
+          `Scene file does not exist: ${args.scenePath}`,
+          [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first'
+          ]
+        );
+      }
+
+      // Check if the texture file exists
+      const texturePath = join(args.projectPath, args.texturePath);
+      if (!existsSync(texturePath)) {
+        return this.createErrorResponse(
+          `Texture file does not exist: ${args.texturePath}`,
+          [
+            'Ensure the texture path is correct',
+            'Upload or create the texture file first'
+          ]
+        );
+      }
+
+      // Create GDScript to load the sprite
+      const scriptContent = `
+#!/usr/bin/env -S godot --headless --script
+extends SceneTree
+
+func _init():
+    print("Loading sprite into scene: ${args.scenePath}")
+    
+    # Load the scene
+    var scene = load("${args.scenePath}")
+    if not scene:
+        printerr("Failed to load scene: ${args.scenePath}")
+        quit(1)
+    
+    # Instance the scene
+    var root = scene.instantiate()
+    
+    # Find the sprite node
+    var node_path = "${args.nodePath}"
+    if node_path.begins_with("root/"):
+        node_path = node_path.substr(5)  # Remove "root/" prefix
+    
+    var sprite_node = null
+    if node_path == "":
+        # If no node path, assume root is the sprite
+        sprite_node = root
+    else:
+        sprite_node = root.get_node(node_path)
+    
+    if not sprite_node:
+        printerr("Node not found: ${args.nodePath}")
+        quit(1)
+    
+    # Check if the node is a Sprite2D or compatible type
+    if not (sprite_node is Sprite2D or sprite_node is Sprite3D or sprite_node is TextureRect):
+        printerr("Node is not a sprite-compatible type: " + sprite_node.get_class())
+        quit(1)
+    
+    # Load the texture
+    var texture = load("${args.texturePath}")
+    if not texture:
+        printerr("Failed to load texture: ${args.texturePath}")
+        quit(1)
+    
+    # Set the texture on the sprite
+    if sprite_node is Sprite2D or sprite_node is Sprite3D:
+        sprite_node.texture = texture
+    elif sprite_node is TextureRect:
+        sprite_node.texture = texture
+    
+    # Save the modified scene
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(root)
+    if result == OK:
+        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
+        if error == OK:
+            print("Sprite loaded successfully with texture: ${args.texturePath}")
+        else:
+            printerr("Failed to save scene: " + str(error))
+    else:
+        printerr("Failed to pack scene: " + str(result))
+    
+    quit()
+`;
+
+      const scriptPath = this.createTempGDScript(scriptContent);
+      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to load sprite: ${stderr}`,
+          [
+            'Check if the node path is correct',
+            'Ensure the node is a Sprite2D, Sprite3D, or TextureRect',
+            'Verify the texture file is a valid image format'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Sprite loaded successfully with texture: ${args.texturePath}\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to load sprite: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the export_mesh_library tool
+   * @param args Tool arguments
+   */
+  private async handleExportMeshLibrary(args: any) {
+    if (!args.projectPath || !args.scenePath || !args.outputPath) {
+      return this.createErrorResponse(
+        'Missing required parameters',
+        ['Provide projectPath, scenePath, and outputPath']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.scenePath) || !this.validatePath(args.outputPath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Check if the scene file exists
+      const scenePath = join(args.projectPath, args.scenePath);
+      if (!existsSync(scenePath)) {
+        return this.createErrorResponse(
+          `Scene file does not exist: ${args.scenePath}`,
+          [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first'
+          ]
+        );
+      }
+
+      // Create the directory for the output if it doesn't exist
+      const outputDir = dirname(join(args.projectPath, args.outputPath));
+      if (!existsSync(outputDir)) {
+        this.logDebug(`Creating directory: ${outputDir}`);
+        mkdirSync(outputDir, { recursive: true });
+      }
+
+      // Convert meshItemNames array to JSON string if provided
+      let meshItemNamesJson = '[]';
+      if (args.meshItemNames && Array.isArray(args.meshItemNames)) {
+        meshItemNamesJson = JSON.stringify(args.meshItemNames);
+      }
+
+      // Create GDScript to export the mesh library
+      const scriptContent = `
+#!/usr/bin/env -S godot --headless --script
+extends SceneTree
+
+func _init():
+    print("Exporting MeshLibrary from scene: ${args.scenePath}")
+    
+    # Load the scene
+    var scene = load("${args.scenePath}")
+    if not scene:
+        printerr("Failed to load scene: ${args.scenePath}")
+        quit(1)
+    
+    # Instance the scene
+    var root = scene.instantiate()
+    
+    # Create a new MeshLibrary
+    var mesh_library = MeshLibrary.new()
+    
+    # Get mesh item names if provided
+    var mesh_item_names = ${meshItemNamesJson}
+    var use_specific_items = mesh_item_names.size() > 0
+    
+    # Process all child nodes
+    var item_id = 0
+    for child in root.get_children():
+        # Skip if not using all items and this item is not in the list
+        if use_specific_items and not (child.name in mesh_item_names):
+            continue
+            
+        # Check if the child has a mesh
+        var mesh_instance = null
+        if child is MeshInstance3D:
+            mesh_instance = child
+        else:
+            # Try to find a MeshInstance3D in the child's descendants
+            for descendant in child.get_children():
+                if descendant is MeshInstance3D:
+                    mesh_instance = descendant
+                    break
+        
+        if mesh_instance and mesh_instance.mesh:
+            print("Adding mesh: " + child.name)
+            
+            # Add the mesh to the library
+            mesh_library.create_item(item_id)
+            mesh_library.set_item_name(item_id, child.name)
+            mesh_library.set_item_mesh(item_id, mesh_instance.mesh)
+            
+            # Add collision shape if available
+            for collision_child in child.get_children():
+                if collision_child is CollisionShape3D and collision_child.shape:
+                    mesh_library.set_item_shapes(item_id, [collision_child.shape])
+                    break
+            
+            # Add preview if available
+            if mesh_instance.mesh:
+                mesh_library.set_item_preview(item_id, mesh_instance.mesh)
+            
+            item_id += 1
+    
+    # Save the mesh library
+    if item_id > 0:
+        var error = ResourceSaver.save(mesh_library, "${args.outputPath}")
+        if error == OK:
+            print("MeshLibrary exported successfully with " + str(item_id) + " items to: ${args.outputPath}")
+        else:
+            printerr("Failed to save MeshLibrary: " + str(error))
+    else:
+        printerr("No valid meshes found in the scene")
+    
+    quit()
+`;
+
+      const scriptPath = this.createTempGDScript(scriptContent);
+      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to export mesh library: ${stderr}`,
+          [
+            'Check if the scene contains valid 3D meshes',
+            'Ensure the output path is valid',
+            'Verify the scene file is valid'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `MeshLibrary exported successfully to: ${args.outputPath}\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to export mesh library: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the save_scene tool
+   * @param args Tool arguments
+   */
+  private async handleSaveScene(args: any) {
+    if (!args.projectPath || !args.scenePath) {
+      return this.createErrorResponse(
+        'Missing required parameters',
+        ['Provide projectPath and scenePath']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.scenePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    // If newPath is provided, validate it
+    if (args.newPath && !this.validatePath(args.newPath)) {
+      return this.createErrorResponse(
+        'Invalid new path',
+        ['Provide a valid new path without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Check if the scene file exists
+      const scenePath = join(args.projectPath, args.scenePath);
+      if (!existsSync(scenePath)) {
+        return this.createErrorResponse(
+          `Scene file does not exist: ${args.scenePath}`,
+          [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first'
+          ]
+        );
+      }
+
+      // If newPath is provided, create the directory if it doesn't exist
+      let savePath = args.scenePath;
+      if (args.newPath) {
+        savePath = args.newPath;
+        const newPathDir = dirname(join(args.projectPath, args.newPath));
+        if (!existsSync(newPathDir)) {
+          this.logDebug(`Creating directory: ${newPathDir}`);
+          mkdirSync(newPathDir, { recursive: true });
+        }
+      }
+
+      // Create GDScript to save the scene
+      const scriptContent = `
+#!/usr/bin/env -S godot --headless --script
+extends SceneTree
+
+func _init():
+    print("Saving scene: ${args.scenePath}")
+    
+    # Load the scene
+    var scene = load("${args.scenePath}")
+    if not scene:
+        printerr("Failed to load scene: ${args.scenePath}")
+        quit(1)
+    
+    # Instance the scene
+    var root = scene.instantiate()
+    
+    # Create a packed scene
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(root)
+    if result == OK:
+        # Save the scene
+        var error = ResourceSaver.save(packed_scene, "${savePath}")
+        if error == OK:
+            print("Scene saved successfully to: ${savePath}")
+        else:
+            printerr("Failed to save scene: " + str(error))
+    else:
+        printerr("Failed to pack scene: " + str(result))
+    
+    quit()
+`;
+
+      const scriptPath = this.createTempGDScript(scriptContent);
+      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to save scene: ${stderr}`,
+          [
+            'Check if the scene file is valid',
+            'Ensure you have write permissions to the output path',
+            'Verify the scene can be properly packed'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Scene saved successfully to: ${savePath}\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to save scene: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
 
   /**
    * Start the MCP server
