@@ -175,11 +175,31 @@ Once configured, your AI assistant will automatically run the MCP server when ne
 "Create a UI scene with buttons and labels for my game's main menu"
 ```
 
+## Implementation Details
+
+### Architecture
+
+The Godot MCP server uses a bundled GDScript approach for complex operations:
+
+1. **Direct Commands**: Simple operations like launching the editor or getting project info use Godot's built-in CLI commands directly.
+2. **Bundled Operations Script**: Complex operations like creating scenes or adding nodes use a single, comprehensive GDScript file (`godot_operations.gd`) that handles all operations.
+
+This architecture provides several benefits:
+
+- **No Temporary Files**: Eliminates the need for temporary script files, keeping your system clean
+- **Simplified Codebase**: Centralizes all Godot operations in one (somewhat) organized file
+- **Better Maintainability**: Makes it easier to add new operations or modify existing ones
+- **Improved Error Handling**: Provides consistent error reporting across all operations
+- **Reduced Overhead**: Minimizes file I/O operations for better performance
+
+The bundled script accepts operation type and parameters as JSON, allowing for flexible and dynamic operation execution without generating temporary files for each operation.
+
 ## Troubleshooting
 
 - **Godot Not Found**: Set the GODOT_PATH environment variable to your Godot executable
 - **Connection Issues**: Ensure the server is running and restart your AI assistant
 - **Invalid Project Path**: Ensure the path points to a directory containing a project.godot file
+- **Build Issues**: Make sure all dependencies are installed by running `npm install`
 
 ## License
 

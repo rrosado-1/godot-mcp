@@ -18,10 +18,8 @@ import {
 import { spawn } from 'child_process';
 import { promisify } from 'util';
 import { exec } from 'child_process';
-import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readdirSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
-import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
 
 const execAsync = promisify(exec);
 
@@ -43,6 +41,13 @@ interface GodotServerConfig {
 }
 
 /**
+ * Interface for operation parameters
+ */
+interface OperationParams {
+  [key: string]: any;
+}
+
+/**
  * Main server class for the Godot MCP server
  */
 class GodotServer {
@@ -50,6 +55,7 @@ class GodotServer {
   private activeProcess: GodotProcess | null = null;
   private godotPath: string = '/Applications/Godot.app/Contents/MacOS/Godot'; // Default for macOS
   private debugMode: boolean = false;
+  private operationsScriptPath: string;
 
   constructor(config?: GodotServerConfig) {
     // Apply configuration if provided
@@ -71,6 +77,10 @@ class GodotServer {
       this.debugMode = true;
       this.logDebug('Debug mode enabled from environment');
     }
+    
+    // Set the path to the operations script
+    this.operationsScriptPath = join(__dirname, 'scripts', 'godot_operations.gd');
+    this.logDebug(`Operations script path: ${this.operationsScriptPath}`);
 
     // Initialize the MCP server
     this.server = new Server(
@@ -993,33 +1003,26 @@ class GodotServer {
 
 
   /**
-   * Create a temporary GDScript file
-   * @param content The GDScript content
-   * @returns Path to the temporary file
-   */
-  private createTempGDScript(content: string): string {
-    const tempDir = tmpdir();
-    const scriptId = randomUUID();
-    const scriptPath = join(tempDir, `godot_mcp_${scriptId}.gd`);
-    
-    this.logDebug(`Creating temporary GDScript at: ${scriptPath}`);
-    writeFileSync(scriptPath, content);
-    
-    return scriptPath;
-  }
-
-  /**
-   * Execute a GDScript file with Godot
-   * @param scriptPath Path to the GDScript file
+   * Execute a Godot operation using the operations script
+   * @param operation The operation to execute
+   * @param params The parameters for the operation
    * @param projectPath Path to the Godot project
    * @returns Output from Godot
    */
-  private async executeGDScript(scriptPath: string, projectPath: string): Promise<{stdout: string, stderr: string}> {
-    this.logDebug(`Executing GDScript: ${scriptPath} in project: ${projectPath}`);
+  private async executeOperation(
+    operation: string, 
+    params: OperationParams, 
+    projectPath: string
+  ): Promise<{stdout: string, stderr: string}> {
+    this.logDebug(`Executing operation: ${operation} in project: ${projectPath}`);
+    this.logDebug(`Operation params: ${JSON.stringify(params)}`);
     
     try {
+      // Escape single quotes in the JSON string to prevent command injection
+      const escapedParams = JSON.stringify(params).replace(/'/g, "'\\''");
+      
       const { stdout, stderr } = await execAsync(
-        `"${this.godotPath}" --headless --script "${scriptPath}" --path "${projectPath}"`
+        `"${this.godotPath}" --headless --script "${this.operationsScriptPath}" ${operation} '${escapedParams}' --path "${projectPath}"`
       );
       
       return { stdout, stderr };
@@ -1075,46 +1078,14 @@ class GodotServer {
         );
       }
 
-      // Set default root node type if not provided
-      const rootNodeType = args.rootNodeType || 'Node2D';
+      // Prepare parameters for the operation
+      const params = {
+        scene_path: args.scenePath,
+        root_node_type: args.rootNodeType || 'Node2D'
+      };
       
-      // Create the directory for the scene if it doesn't exist
-      const sceneDir = dirname(join(args.projectPath, args.scenePath));
-      if (!existsSync(sceneDir)) {
-        this.logDebug(`Creating directory: ${sceneDir}`);
-        mkdirSync(sceneDir, { recursive: true });
-      }
-
-      // Create GDScript to create the scene
-      const scriptContent = `
-#!/usr/bin/env -S godot --headless --script
-extends SceneTree
-
-func _init():
-    print("Creating scene: ${args.scenePath}")
-    
-    # Create the root node
-    var root = ${rootNodeType}.new()
-    root.name = "root"
-    
-    # Create a packed scene
-    var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
-    if result == OK:
-        # Save the scene
-        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
-        if error == OK:
-            print("Scene created successfully at: ${args.scenePath}")
-        else:
-            printerr("Failed to save scene: " + str(error))
-    else:
-        printerr("Failed to pack scene: " + str(result))
-    
-    quit()
-`;
-
-      const scriptPath = this.createTempGDScript(scriptContent);
-      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('create_scene', params, args.projectPath);
       
       if (stderr && stderr.includes("Failed to")) {
         return this.createErrorResponse(
@@ -1191,80 +1162,24 @@ func _init():
         );
       }
 
-      // Set default parent node path if not provided
-      const parentNodePath = args.parentNodePath || 'root';
+      // Prepare parameters for the operation
+      const params: OperationParams = {
+        scene_path: args.scenePath,
+        node_type: args.nodeType,
+        node_name: args.nodeName
+      };
       
-      // Convert properties object to JSON string if provided
-      let propertiesJson = '{}';
-      if (args.properties) {
-        propertiesJson = JSON.stringify(args.properties);
+      // Add optional parameters
+      if (args.parentNodePath) {
+        params.parent_node_path = args.parentNodePath;
       }
-
-      // Create GDScript to add the node
-      const scriptContent = `
-#!/usr/bin/env -S godot --headless --script
-extends SceneTree
-
-func _init():
-    print("Adding node to scene: ${args.scenePath}")
-    
-    # Load the scene
-    var scene = load("${args.scenePath}")
-    if not scene:
-        printerr("Failed to load scene: ${args.scenePath}")
-        quit(1)
-    
-    # Instance the scene
-    var root = scene.instantiate()
-    
-    # Find the parent node
-    var parent = root
-    if "${parentNodePath}" != "root":
-        parent = root.get_node("${parentNodePath.replace('root/', '')}")
-        if not parent:
-            printerr("Parent node not found: ${parentNodePath}")
-            quit(1)
-    
-    # Create the new node
-    var new_node
-    
-    # Try to create the node
-    try:
-        new_node = ${args.nodeType}.new()
-    except:
-        printerr("Failed to create node of type: ${args.nodeType}")
-        printerr("This node type may not exist or may not be instantiable")
-        quit(1)
-    
-    new_node.name = "${args.nodeName}"
-    
-    # Set properties if provided
-    var properties = ${propertiesJson}
-    for property in properties:
-        if new_node.get("property") != null:  # Check if property exists
-            new_node.set(property, properties[property])
-    
-    # Add the node to the parent
-    parent.add_child(new_node)
-    new_node.owner = root
-    
-    # Save the modified scene
-    var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
-    if result == OK:
-        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
-        if error == OK:
-            print("Node '${args.nodeName}' of type '${args.nodeType}' added successfully")
-        else:
-            printerr("Failed to save scene: " + str(error))
-    else:
-        printerr("Failed to pack scene: " + str(result))
-    
-    quit()
-`;
-
-      const scriptPath = this.createTempGDScript(scriptContent);
-      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      if (args.properties) {
+        params.properties = args.properties;
+      }
+      
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('add_node', params, args.projectPath);
       
       if (stderr && stderr.includes("Failed to")) {
         return this.createErrorResponse(
@@ -1354,73 +1269,15 @@ func _init():
         );
       }
 
-      // Create GDScript to load the sprite
-      const scriptContent = `
-#!/usr/bin/env -S godot --headless --script
-extends SceneTree
-
-func _init():
-    print("Loading sprite into scene: ${args.scenePath}")
-    
-    # Load the scene
-    var scene = load("${args.scenePath}")
-    if not scene:
-        printerr("Failed to load scene: ${args.scenePath}")
-        quit(1)
-    
-    # Instance the scene
-    var root = scene.instantiate()
-    
-    # Find the sprite node
-    var node_path = "${args.nodePath}"
-    if node_path.begins_with("root/"):
-        node_path = node_path.substr(5)  # Remove "root/" prefix
-    
-    var sprite_node = null
-    if node_path == "":
-        # If no node path, assume root is the sprite
-        sprite_node = root
-    else:
-        sprite_node = root.get_node(node_path)
-    
-    if not sprite_node:
-        printerr("Node not found: ${args.nodePath}")
-        quit(1)
-    
-    # Check if the node is a Sprite2D or compatible type
-    if not (sprite_node is Sprite2D or sprite_node is Sprite3D or sprite_node is TextureRect):
-        printerr("Node is not a sprite-compatible type: " + sprite_node.get_class())
-        quit(1)
-    
-    # Load the texture
-    var texture = load("${args.texturePath}")
-    if not texture:
-        printerr("Failed to load texture: ${args.texturePath}")
-        quit(1)
-    
-    # Set the texture on the sprite
-    if sprite_node is Sprite2D or sprite_node is Sprite3D:
-        sprite_node.texture = texture
-    elif sprite_node is TextureRect:
-        sprite_node.texture = texture
-    
-    # Save the modified scene
-    var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
-    if result == OK:
-        var error = ResourceSaver.save(packed_scene, "${args.scenePath}")
-        if error == OK:
-            print("Sprite loaded successfully with texture: ${args.texturePath}")
-        else:
-            printerr("Failed to save scene: " + str(error))
-    else:
-        printerr("Failed to pack scene: " + str(result))
-    
-    quit()
-`;
-
-      const scriptPath = this.createTempGDScript(scriptContent);
-      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      // Prepare parameters for the operation
+      const params = {
+        scene_path: args.scenePath,
+        node_path: args.nodePath,
+        texture_path: args.texturePath
+      };
+      
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('load_sprite', params, args.projectPath);
       
       if (stderr && stderr.includes("Failed to")) {
         return this.createErrorResponse(
@@ -1504,89 +1361,19 @@ func _init():
         mkdirSync(outputDir, { recursive: true });
       }
 
-      // Convert meshItemNames array to JSON string if provided
-      let meshItemNamesJson = '[]';
+      // Prepare parameters for the operation
+      const params: OperationParams = {
+        scene_path: args.scenePath,
+        output_path: args.outputPath
+      };
+      
+      // Add optional parameters
       if (args.meshItemNames && Array.isArray(args.meshItemNames)) {
-        meshItemNamesJson = JSON.stringify(args.meshItemNames);
+        params.mesh_item_names = args.meshItemNames;
       }
-
-      // Create GDScript to export the mesh library
-      const scriptContent = `
-#!/usr/bin/env -S godot --headless --script
-extends SceneTree
-
-func _init():
-    print("Exporting MeshLibrary from scene: ${args.scenePath}")
-    
-    # Load the scene
-    var scene = load("${args.scenePath}")
-    if not scene:
-        printerr("Failed to load scene: ${args.scenePath}")
-        quit(1)
-    
-    # Instance the scene
-    var root = scene.instantiate()
-    
-    # Create a new MeshLibrary
-    var mesh_library = MeshLibrary.new()
-    
-    # Get mesh item names if provided
-    var mesh_item_names = ${meshItemNamesJson}
-    var use_specific_items = mesh_item_names.size() > 0
-    
-    # Process all child nodes
-    var item_id = 0
-    for child in root.get_children():
-        # Skip if not using all items and this item is not in the list
-        if use_specific_items and not (child.name in mesh_item_names):
-            continue
-            
-        # Check if the child has a mesh
-        var mesh_instance = null
-        if child is MeshInstance3D:
-            mesh_instance = child
-        else:
-            # Try to find a MeshInstance3D in the child's descendants
-            for descendant in child.get_children():
-                if descendant is MeshInstance3D:
-                    mesh_instance = descendant
-                    break
-        
-        if mesh_instance and mesh_instance.mesh:
-            print("Adding mesh: " + child.name)
-            
-            # Add the mesh to the library
-            mesh_library.create_item(item_id)
-            mesh_library.set_item_name(item_id, child.name)
-            mesh_library.set_item_mesh(item_id, mesh_instance.mesh)
-            
-            # Add collision shape if available
-            for collision_child in child.get_children():
-                if collision_child is CollisionShape3D and collision_child.shape:
-                    mesh_library.set_item_shapes(item_id, [collision_child.shape])
-                    break
-            
-            # Add preview if available
-            if mesh_instance.mesh:
-                mesh_library.set_item_preview(item_id, mesh_instance.mesh)
-            
-            item_id += 1
-    
-    # Save the mesh library
-    if item_id > 0:
-        var error = ResourceSaver.save(mesh_library, "${args.outputPath}")
-        if error == OK:
-            print("MeshLibrary exported successfully with " + str(item_id) + " items to: ${args.outputPath}")
-        else:
-            printerr("Failed to save MeshLibrary: " + str(error))
-    else:
-        printerr("No valid meshes found in the scene")
-    
-    quit()
-`;
-
-      const scriptPath = this.createTempGDScript(scriptContent);
-      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('export_mesh_library', params, args.projectPath);
       
       if (stderr && stderr.includes("Failed to")) {
         return this.createErrorResponse(
@@ -1672,9 +1459,7 @@ func _init():
       }
 
       // If newPath is provided, create the directory if it doesn't exist
-      let savePath = args.scenePath;
       if (args.newPath) {
-        savePath = args.newPath;
         const newPathDir = dirname(join(args.projectPath, args.newPath));
         if (!existsSync(newPathDir)) {
           this.logDebug(`Creating directory: ${newPathDir}`);
@@ -1682,41 +1467,18 @@ func _init():
         }
       }
 
-      // Create GDScript to save the scene
-      const scriptContent = `
-#!/usr/bin/env -S godot --headless --script
-extends SceneTree
-
-func _init():
-    print("Saving scene: ${args.scenePath}")
-    
-    # Load the scene
-    var scene = load("${args.scenePath}")
-    if not scene:
-        printerr("Failed to load scene: ${args.scenePath}")
-        quit(1)
-    
-    # Instance the scene
-    var root = scene.instantiate()
-    
-    # Create a packed scene
-    var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
-    if result == OK:
-        # Save the scene
-        var error = ResourceSaver.save(packed_scene, "${savePath}")
-        if error == OK:
-            print("Scene saved successfully to: ${savePath}")
-        else:
-            printerr("Failed to save scene: " + str(error))
-    else:
-        printerr("Failed to pack scene: " + str(result))
-    
-    quit()
-`;
-
-      const scriptPath = this.createTempGDScript(scriptContent);
-      const { stdout, stderr } = await this.executeGDScript(scriptPath, args.projectPath);
+      // Prepare parameters for the operation
+      const params: OperationParams = {
+        scene_path: args.scenePath
+      };
+      
+      // Add optional parameters
+      if (args.newPath) {
+        params.new_path = args.newPath;
+      }
+      
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('save_scene', params, args.projectPath);
       
       if (stderr && stderr.includes("Failed to")) {
         return this.createErrorResponse(
@@ -1729,6 +1491,7 @@ func _init():
         );
       }
       
+      const savePath = args.newPath || args.scenePath;
       return {
         content: [
           {
