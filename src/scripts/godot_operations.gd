@@ -28,6 +28,10 @@ func _init():
             export_mesh_library(params)
         "save_scene":
             save_scene(params)
+        "check_uids":
+            check_uids(params)
+        "resave_resources":
+            resave_resources(params)
         _:
             printerr("Unknown operation: " + operation)
             quit(1)
@@ -289,6 +293,105 @@ func export_mesh_library(params):
             printerr("Failed to save MeshLibrary: " + str(error))
     else:
         printerr("No valid meshes found in the scene")
+
+# Find files with a specific extension recursively
+func find_files(path, extension):
+    var files = []
+    var dir = DirAccess.open(path)
+    
+    if dir:
+        dir.list_dir_begin()
+        var file_name = dir.get_next()
+        
+        while file_name != "":
+            if dir.current_is_dir() and not file_name.begins_with("."):
+                files.append_array(find_files(path + file_name + "/", extension))
+            elif file_name.ends_with(extension):
+                files.append(path + file_name)
+            
+            file_name = dir.get_next()
+    
+    return files
+
+# Check UID status for scripts and shaders
+func check_uids(params):
+    print("Checking UID status for project...")
+    
+    # Get all .gd and .shader files
+    var scripts = find_files("res://", ".gd") + find_files("res://", ".shader") + find_files("res://", ".gdshader")
+    print("Found " + str(scripts.size()) + " scripts/shaders")
+    
+    # Check for missing .uid files
+    var missing_uids = []
+    var uid_count = 0
+    
+    for script_path in scripts:
+        var uid_path = script_path + ".uid"
+        var f = FileAccess.open(uid_path, FileAccess.READ)
+        if f:
+            uid_count += 1
+        else:
+            missing_uids.append(script_path)
+    
+    # Print summary as JSON
+    var result = {
+        "scriptCount": scripts.size(),
+        "uidCount": uid_count,
+        "missingCount": missing_uids.size(),
+        "missingFiles": missing_uids.slice(0, 10) # Only show first 10 for brevity
+    }
+    
+    print(JSON.stringify(result))
+
+# Resave all resources to update UID references
+func resave_resources(params):
+    print("Resaving all resources to update UID references...")
+    
+    # Get all .tscn files
+    var scenes = find_files("res://", ".tscn")
+    print("Found " + str(scenes.size()) + " scenes")
+    
+    # Resave each scene
+    var success_count = 0
+    var error_count = 0
+    
+    for scene_path in scenes:
+        print("Processing: " + scene_path)
+        var scene = load(scene_path)
+        if scene:
+            var error = ResourceSaver.save(scene, scene_path)
+            if error == OK:
+                success_count += 1
+            else:
+                error_count += 1
+                printerr("Failed to save: " + scene_path + ", error: " + str(error))
+        else:
+            error_count += 1
+            printerr("Failed to load: " + scene_path)
+    
+    # Get all .gd and .shader files
+    var scripts = find_files("res://", ".gd") + find_files("res://", ".shader") + find_files("res://", ".gdshader")
+    print("Found " + str(scripts.size()) + " scripts/shaders")
+    
+    # Check for missing .uid files
+    var missing_uids = 0
+    for script_path in scripts:
+        var uid_path = script_path + ".uid"
+        var f = FileAccess.open(uid_path, FileAccess.READ)
+        if not f:
+            missing_uids += 1
+            print("Missing UID file for: " + script_path)
+            # Force a save to generate UID
+            var res = load(script_path)
+            if res:
+                ResourceSaver.save(res, script_path)
+    
+    print("Summary:")
+    print("- Scenes processed: " + str(scenes.size()))
+    print("- Scenes successfully saved: " + str(success_count))
+    print("- Scenes with errors: " + str(error_count))
+    print("- Scripts/shaders missing UIDs: " + str(missing_uids))
+    print("Resave operation complete")
 
 # Save changes to a scene file
 func save_scene(params):

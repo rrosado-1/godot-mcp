@@ -461,6 +461,34 @@ class GodotServer {
             required: ['projectPath', 'scenePath'],
           },
         },
+        {
+          name: 'check_uid_status',
+          description: 'Check the UID status of scripts and shaders in a Godot project (for Godot 4.4+)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+            },
+            required: ['projectPath'],
+          },
+        },
+        {
+          name: 'update_project_uids',
+          description: 'Update UID references in a Godot project by resaving resources (for Godot 4.4+)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+            },
+            required: ['projectPath'],
+          },
+        },
       ],
     }));
 
@@ -492,6 +520,10 @@ class GodotServer {
           return await this.handleExportMeshLibrary(request.params.arguments);
         case 'save_scene':
           return await this.handleSaveScene(request.params.arguments);
+        case 'check_uid_status':
+          return await this.handleCheckUidStatus(request.params.arguments);
+        case 'update_project_uids':
+          return await this.handleUpdateProjectUids(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -737,17 +769,93 @@ class GodotServer {
   }
 
   /**
+   * Check if the Godot version is 4.4 or later
+   * @param versionString Godot version string
+   * @returns boolean indicating if version is 4.4+
+   */
+  private isGodot44OrLater(versionString: string): boolean {
+    const versionMatch = versionString.match(/(\d+)\.(\d+)/);
+    if (versionMatch) {
+      const major = parseInt(versionMatch[1], 10);
+      const minor = parseInt(versionMatch[2], 10);
+      return (major > 4) || (major === 4 && minor >= 4);
+    }
+    return false;
+  }
+
+  /**
    * Handle the get_godot_version tool
    */
   private async handleGetGodotVersion() {
     try {
       this.logDebug('Getting Godot version');
       const { stdout } = await execAsync(`"${this.godotPath}" --version`);
+      const version = stdout.trim();
+      
+      // Parse version components
+      const versionMatch = version.match(/(\d+)\.(\d+)/);
+      const major = versionMatch ? parseInt(versionMatch[1], 10) : 0;
+      const minor = versionMatch ? parseInt(versionMatch[2], 10) : 0;
+      
+      // Determine version-specific features and tools
+      const versionFeatures = {
+        // Base features available in all versions
+        base: {
+          sceneManagement: true,
+          projectExecution: true,
+          debugOutput: true
+        },
+        
+        // Version-specific features
+        versionSpecific: {}
+      };
+      
+      // Add version-specific tools information
+      const versionTools = [];
+      
+      // Godot 4.4+ features
+      if (major > 4 || (major === 4 && minor >= 4)) {
+        Object.assign(versionFeatures.versionSpecific, {
+          uidSystem: {
+            available: true,
+            description: "UID system for scripts and shaders with .uid files"
+          }
+          // Add more 4.4+ features here as they're implemented
+        });
+        
+        versionTools.push(
+          {
+            name: "check_uid_status",
+            purpose: "Check for missing .uid files in scripts and shaders",
+            recommendedUse: "Use before moving script files outside of Godot"
+          },
+          {
+            name: "update_project_uids",
+            purpose: "Generate missing .uid files and update UID references",
+            recommendedUse: "Use after upgrading to Godot 4.4 or when UID issues are detected"
+          }
+          // Add more 4.4+ tools here as they're implemented
+        );
+      }
+      
+      // Future version features can be added in similar conditionals
+      
       return {
         content: [
           {
             type: 'text',
-            text: stdout.trim(),
+            text: JSON.stringify({
+              version: version,
+              majorVersion: major,
+              minorVersion: minor,
+              features: versionFeatures,
+              versionSpecificTools: versionTools,
+              // This helps AI assistants know what to check for
+              checkFor: {
+                uidSupport: major > 4 || (major === 4 && minor >= 4)
+                // Add more version checks here as needed
+              }
+            }, null, 2),
           },
         ],
       };
@@ -1507,6 +1615,166 @@ class GodotServer {
           'Ensure Godot is installed correctly',
           'Check if the GODOT_PATH environment variable is set correctly',
           'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the check_uid_status tool
+   * @param args Tool arguments
+   */
+  private async handleCheckUidStatus(args: any) {
+    if (!args.projectPath) {
+      return this.createErrorResponse(
+        'Project path is required',
+        ['Provide a valid path to a Godot project directory']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath)) {
+      return this.createErrorResponse(
+        'Invalid project path',
+        ['Provide a valid path without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Get Godot version
+      const { stdout: versionOutput } = await execAsync(`"${this.godotPath}" --version`);
+      const version = versionOutput.trim();
+      const isGodot44Plus = this.isGodot44OrLater(version);
+      
+      if (!isGodot44Plus) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                godotVersion: version,
+                supportsUids: false,
+                message: "This Godot version does not support the UID system for scripts and shaders. Upgrade to Godot 4.4 or later for UID support."
+              }, null, 2),
+            },
+          ],
+        };
+      }
+      
+      // Execute the operation using the bundled script
+      const { stdout: opStdout, stderr: opStderr } = await this.executeOperation('check_uids', {}, args.projectPath);
+      
+      // Parse the JSON output
+      let uidStatus = {};
+      try {
+        // Find JSON in the output
+        const jsonMatch = opStdout.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          uidStatus = JSON.parse(jsonMatch[0]);
+        }
+      } catch (parseError) {
+        this.logDebug(`Failed to parse UID status JSON: ${parseError}`);
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              godotVersion: version,
+              supportsUids: true,
+              uidStatus: uidStatus
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to check UID status: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the update_project_uids tool
+   * @param args Tool arguments
+   */
+  private async handleUpdateProjectUids(args: any) {
+    if (!args.projectPath) {
+      return this.createErrorResponse(
+        'Project path is required',
+        ['Provide a valid path to a Godot project directory']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath)) {
+      return this.createErrorResponse(
+        'Invalid project path',
+        ['Provide a valid path without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Get Godot version
+      const { stdout: versionOutput } = await execAsync(`"${this.godotPath}" --version`);
+      const version = versionOutput.trim();
+      const isGodot44Plus = this.isGodot44OrLater(version);
+      
+      if (!isGodot44Plus) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Note: This tool is designed for Godot 4.4+, but detected version is ${version}. The operation will still run, but may not be necessary.`,
+            },
+          ],
+        };
+      }
+      
+      // Execute the operation using the bundled script
+      const { stdout: opStdout, stderr: opStderr } = await this.executeOperation('resave_resources', {}, args.projectPath);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Updated UID references in project:\n\n${opStdout}\n\nErrors (if any):\n${opStderr}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to update UIDs: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the project path is accessible'
         ]
       );
     }
