@@ -200,6 +200,10 @@ The bundled script accepts operation type and parameters as JSON, allowing for f
 - **Connection Issues**: Ensure the server is running and restart your AI assistant
 - **Invalid Project Path**: Ensure the path points to a directory containing a project.godot file
 - **Build Issues**: Make sure all dependencies are installed by running `npm install`
+- **For Cursor Specifically**:
+-   Ensure the MCP server shows up and is enabled in Cursor settings (Settings > MCP)
+-   MCP tools can only be run using the Agent chat profile (Cursor Pro or Business subscription)
+-   Use "Yolo Mode" to automatically run MCP tool requests
 
 ## License
 
