@@ -7,6 +7,13 @@
  * capture debug output, and control project execution.
  */
 
+import { fileURLToPath } from 'url';
+import { join, dirname, basename } from 'path';
+import { existsSync, readdirSync, mkdirSync } from 'fs';
+import { spawn } from 'child_process';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -15,13 +22,12 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'child_process';
-import { promisify } from 'util';
-import { exec } from 'child_process';
-import { existsSync, readdirSync, mkdirSync } from 'fs';
-import { join, dirname, basename } from 'path';
 
 const execAsync = promisify(exec);
+
+// Derive __filename and __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Interface representing a running Godot process
@@ -1108,7 +1114,6 @@ class GodotServer {
       return { error: 'Failed to get project structure' };
     }
   }
-
 
   /**
    * Execute a Godot operation using the operations script
