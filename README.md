@@ -66,7 +66,6 @@ This direct feedback loop helps AI assistants like Claude understand what works 
 - **UID Management** (for Godot 4.4+):
   - Check UID status of scripts and shaders
   - Update UID references by resaving resources
-  - Get detailed information about UID compatibility
 
 ## Requirements
 
@@ -183,8 +182,6 @@ Once configured, your AI assistant will automatically run the MCP server when ne
 "Check the UID status of my Godot 4.4 project"
 
 "Update UID references in my Godot project after upgrading to 4.4"
-
-"Help me understand how to manage UIDs when moving script files outside of Godot"
 ```
 
 ## Implementation Details
