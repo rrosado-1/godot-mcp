@@ -468,8 +468,8 @@ class GodotServer {
           },
         },
         {
-          name: 'check_uid_status',
-          description: 'Check the UID status of scripts and shaders in a Godot project (for Godot 4.4+)',
+          name: 'get_uid',
+          description: 'Get the UID for a specific file in a Godot project (for Godot 4.4+)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -477,8 +477,12 @@ class GodotServer {
                 type: 'string',
                 description: 'Path to the Godot project directory',
               },
+              filePath: {
+                type: 'string',
+                description: 'Path to the file (relative to project) for which to get the UID',
+              },
             },
-            required: ['projectPath'],
+            required: ['projectPath', 'filePath'],
           },
         },
         {
@@ -526,8 +530,8 @@ class GodotServer {
           return await this.handleExportMeshLibrary(request.params.arguments);
         case 'save_scene':
           return await this.handleSaveScene(request.params.arguments);
-        case 'check_uid_status':
-          return await this.handleCheckUidStatus(request.params.arguments);
+        case 'get_uid':
+          return await this.handleGetUid(request.params.arguments);
         case 'update_project_uids':
           return await this.handleUpdateProjectUids(request.params.arguments);
         default:
@@ -1626,10 +1630,10 @@ class GodotServer {
   }
 
   /**
-   * Handle the check_uid_status tool
+   * Handle the get_uid tool
    * @param args Tool arguments
    */
-  private async handleCheckUidStatus(args: any) {
+  private async handleGetUid(args: any) {
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -1637,10 +1641,17 @@ class GodotServer {
       );
     }
 
-    if (!this.validatePath(args.projectPath)) {
+    if (!args.filePath) {
       return this.createErrorResponse(
-        'Invalid project path',
-        ['Provide a valid path without ".." or other potentially unsafe characters']
+        'File path is required',
+        ['Provide a valid path to the file for which to get the UID']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.filePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
       );
     }
 
@@ -1677,19 +1688,26 @@ class GodotServer {
         };
       }
       
+      // Construct the full file path (relative to the project)
+      const fullFilePath = `res://${args.filePath}`;
+      
       // Execute the operation using the bundled script
-      const { stdout: opStdout, stderr: opStderr } = await this.executeOperation('check_uids', {}, args.projectPath);
+      const params = {
+        file_path: fullFilePath
+      };
+      
+      const { stdout: opStdout, stderr: opStderr } = await this.executeOperation('get_uid', params, args.projectPath);
       
       // Parse the JSON output
-      let uidStatus = {};
+      let uidResult = {};
       try {
         // Find JSON in the output
         const jsonMatch = opStdout.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          uidStatus = JSON.parse(jsonMatch[0]);
+          uidResult = JSON.parse(jsonMatch[0]);
         }
       } catch (parseError) {
-        this.logDebug(`Failed to parse UID status JSON: ${parseError}`);
+        this.logDebug(`Failed to parse UID result JSON: ${parseError}`);
       }
       
       return {
@@ -1699,17 +1717,18 @@ class GodotServer {
             text: JSON.stringify({
               godotVersion: version,
               supportsUids: true,
-              uidStatus: uidStatus
+              uidResult: uidResult
             }, null, 2),
           },
         ],
       };
     } catch (error: any) {
       return this.createErrorResponse(
-        `Failed to check UID status: ${error?.message || 'Unknown error'}`,
+        `Failed to get UID: ${error?.message || 'Unknown error'}`,
         [
           'Ensure Godot is installed correctly',
-          'Check if the project path is accessible'
+          'Check if the file path is accessible',
+          'Verify the file exists in the project'
         ]
       );
     }

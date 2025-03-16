@@ -28,8 +28,8 @@ func _init():
             export_mesh_library(params)
         "save_scene":
             save_scene(params)
-        "check_uids":
-            check_uids(params)
+        "get_uid":
+            get_uid(params)
         "resave_resources":
             resave_resources(params)
         _:
@@ -42,29 +42,15 @@ func _init():
 func create_scene(params):
     print("Creating scene: " + params.scene_path)
     
-    # Create the root node
-    var root_node_type = params.root_node_type if params.has("root_node_type") else "Node2D"
+    # Determine the type of root node to create (default to Node2D if not specified)
+    var root_node_type = params.has("root_node_type") ? params.root_node_type : "Node2D"
     
-    var root
-    match root_node_type:
-        "Node2D": root = Node2D.new()
-        "Node3D": root = Node3D.new()
-        "Control": root = Control.new()
-        "Node": root = Node.new()
-        _:
-            # Try to create the specified type
-            var script = GDScript.new()
-            script.source_code = "extends SceneTree\nfunc _init():\n\treturn " + root_node_type + ".new()"
-            script.reload()
-            
-            # Try to instantiate the type
-            var instance_script = load(script.resource_path)
-            if instance_script:
-                root = instance_script.new()
-            else:
-                printerr("Failed to create root node of type: " + root_node_type)
-                printerr("Falling back to Node2D")
-                root = Node2D.new()
+    # Attempt to instantiate the specified class directly using ClassDB
+    var root = ClassDB.instantiate(root_node_type)
+    if not root:
+        printerr("Failed to instantiate node of type: " + root_node_type)
+        printerr("Class does not exist or cannot be instantiated")
+        quit(1)
     
     root.name = "root"
     
@@ -113,25 +99,11 @@ func add_node(params):
             printerr("Parent node not found: " + parent_path)
             quit(1)
     
-    # Create the new node
-    var new_node
-    
-    # Try to create the node
-    try:
-        var script = GDScript.new()
-        script.source_code = "extends SceneTree\nfunc _init():\n\treturn " + params.node_type + ".new()"
-        script.reload()
-        
-        # Try to instantiate the type
-        var instance_script = load(script.resource_path)
-        if instance_script:
-            new_node = instance_script.new()
-        else:
-            printerr("Failed to create node of type: " + params.node_type)
-            quit(1)
-    except:
-        printerr("Failed to create node of type: " + params.node_type)
-        printerr("This node type may not exist or may not be instantiable")
+    # Attempt to instantiate the specified node type directly using ClassDB
+    var new_node = ClassDB.instantiate(params.node_type)
+    if not new_node:
+        printerr("Failed to instantiate node of type: " + params.node_type)
+        printerr("Class does not exist or cannot be instantiated")
         quit(1)
     
     new_node.name = params.node_name
@@ -313,35 +285,44 @@ func find_files(path, extension):
     
     return files
 
-# Check UID status for scripts and shaders
-func check_uids(params):
-    print("Checking UID status for project...")
+# Get UID for a specific file
+func get_uid(params):
+    if not params.has("file_path"):
+        printerr("File path is required")
+        quit(1)
     
-    # Get all .gd and .shader files
-    var scripts = find_files("res://", ".gd") + find_files("res://", ".shader") + find_files("res://", ".gdshader")
-    print("Found " + str(scripts.size()) + " scripts/shaders")
+    var file_path = params.file_path
+    print("Getting UID for file: " + file_path)
     
-    # Check for missing .uid files
-    var missing_uids = []
-    var uid_count = 0
+    # Ensure the file exists
+    if not FileAccess.file_exists(file_path):
+        printerr("File does not exist: " + file_path)
+        quit(1)
     
-    for script_path in scripts:
-        var uid_path = script_path + ".uid"
-        var f = FileAccess.open(uid_path, FileAccess.READ)
-        if f:
-            uid_count += 1
-        else:
-            missing_uids.append(script_path)
+    # Check if the UID file exists
+    var uid_path = file_path + ".uid"
+    var f = FileAccess.open(uid_path, FileAccess.READ)
     
-    # Print summary as JSON
-    var result = {
-        "scriptCount": scripts.size(),
-        "uidCount": uid_count,
-        "missingCount": missing_uids.size(),
-        "missingFiles": missing_uids.slice(0, 10) # Only show first 10 for brevity
-    }
-    
-    print(JSON.stringify(result))
+    if f:
+        # Read the UID content
+        var uid_content = f.get_as_text()
+        f.close()
+        
+        # Return the UID content
+        var result = {
+            "file": file_path,
+            "uid": uid_content.strip_edges(),
+            "exists": true
+        }
+        print(JSON.stringify(result))
+    else:
+        # UID file doesn't exist
+        var result = {
+            "file": file_path,
+            "exists": false,
+            "message": "UID file does not exist for this file. Use resave_resources to generate UIDs."
+        }
+        print(JSON.stringify(result))
 
 # Resave all resources to update UID references
 func resave_resources(params):

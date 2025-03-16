@@ -64,7 +64,7 @@ This direct feedback loop helps AI assistants like Claude understand what works 
   - Export 3D scenes as MeshLibrary resources for GridMap
   - Save scenes with options for creating variants
 - **UID Management** (for Godot 4.4+):
-  - Check UID status of scripts and shaders
+  - Get UID for specific files
   - Update UID references by resaving resources
 
 ## Requirements
@@ -112,7 +112,7 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
         "load_sprite",
         "export_mesh_library",
         "save_scene",
-        "check_uid_status",
+        "get_uid",
         "update_project_uids"
       ]
     }
@@ -180,7 +180,7 @@ Once configured, your AI assistant will automatically run the MCP server when ne
 
 "Create a UI scene with buttons and labels for my game's main menu"
 
-"Check the UID status of my Godot 4.4 project"
+"Get the UID for a specific script file in my Godot 4.4 project"
 
 "Update UID references in my Godot project after upgrading to 4.4"
 ```
