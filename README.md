@@ -1,6 +1,6 @@
 # Godot MCP
 
-```
+```text
                            (((((((             (((((((                          
                         (((((((((((           (((((((((((                      
                         (((((((((((((       (((((((((((((                       
@@ -151,6 +151,7 @@ Create a file at `.cursor/mcp.json` in your project directory with the following
 ### Step 3: Optional Environment Variables
 
 You can customize the server behavior with these environment variables:
+
 - `GODOT_PATH`: Path to the Godot executable (overrides automatic detection)
 - `DEBUG`: Set to "true" to enable debug logging
 
@@ -158,7 +159,7 @@ You can customize the server behavior with these environment variables:
 
 Once configured, your AI assistant will automatically run the MCP server when needed. You can use prompts like:
 
-```
+```text
 "Launch the Godot editor for my project at /path/to/project"
 
 "Run my Godot project and show me any errors"
