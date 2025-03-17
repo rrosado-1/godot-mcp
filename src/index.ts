@@ -62,6 +62,25 @@ class GodotServer {
   private godotPath: string = '/Applications/Godot.app/Contents/MacOS/Godot'; // Default for macOS
   private debugMode: boolean = false;
   private operationsScriptPath: string;
+  
+  /**
+   * Parameter name mappings from snake_case to camelCase
+   * This allows the server to accept both formats
+   */
+  private parameterMappings: Record<string, string> = {
+    'project_path': 'projectPath',
+    'scene_path': 'scenePath',
+    'root_node_type': 'rootNodeType',
+    'parent_node_path': 'parentNodePath',
+    'node_type': 'nodeType',
+    'node_name': 'nodeName',
+    'texture_path': 'texturePath',
+    'node_path': 'nodePath',
+    'output_path': 'outputPath',
+    'mesh_item_names': 'meshItemNames',
+    'new_path': 'newPath',
+    'file_path': 'filePath'
+  };
 
   constructor(config?: GodotServerConfig) {
     // Apply configuration if provided
@@ -124,6 +143,34 @@ class GodotServer {
     if (this.debugMode) {
       console.log(`[DEBUG] ${message}`);
     }
+  }
+  
+  /**
+   * Normalize parameter names from snake_case to camelCase
+   * This allows the server to accept both formats
+   * @param args The arguments object to normalize
+   * @returns A new object with normalized parameter names
+   */
+  private normalizeParameters(args: any): any {
+    if (!args || typeof args !== 'object') {
+      return args;
+    }
+    
+    const normalizedArgs = { ...args }; // Create a copy to preserve original
+    
+    // Convert snake_case to camelCase
+    for (const snakeCase in this.parameterMappings) {
+      if (args[snakeCase] !== undefined) {
+        const camelCase = this.parameterMappings[snakeCase];
+        // Only set if not already present (don't overwrite)
+        if (normalizedArgs[camelCase] === undefined) {
+          normalizedArgs[camelCase] = args[snakeCase];
+          this.logDebug(`Normalized parameter: ${snakeCase} → ${camelCase}`);
+        }
+      }
+    }
+    
+    return normalizedArgs;
   }
 
   /**
@@ -548,10 +595,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleLaunchEditor(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
@@ -609,10 +662,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleRunProject(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
@@ -884,6 +943,9 @@ class GodotServer {
    * Handle the list_projects tool
    */
   private async handleListProjects(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.directory) {
       return this.createErrorResponse(
         'Directory is required',
@@ -1000,10 +1062,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleGetProjectInfo(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
@@ -1029,10 +1097,10 @@ class GodotServer {
 
       this.logDebug(`Getting project info for: ${args.projectPath}`);
       
-      // Read project.godot file to extract metadata
-      // This is a simplified implementation - in a real implementation,
-      // you would parse the project.godot file to extract more detailed information
-      const { stdout } = await execAsync(`"${this.godotPath}" --path "${args.projectPath}" --version-project`);
+            // Read project.godot file to extract metadata
+            // This is a simplified implementation - in a real implementation,
+            // you would parse the project.godot file to extract more detailed information
+            const { stdout } = await execAsync(`"${this.godotPath}" --headless --path "${args.projectPath}" --version-project`);
       
       // Get additional project information
       const projectName = basename(args.projectPath);
@@ -1139,7 +1207,7 @@ class GodotServer {
       const escapedParams = JSON.stringify(params).replace(/'/g, "'\\''");
       
       const { stdout, stderr } = await execAsync(
-        `"${this.godotPath}" --headless --script "${this.operationsScriptPath}" ${operation} '${escapedParams}' --path "${projectPath}"`
+        `"${this.godotPath}" --headless --path "${projectPath}" --script "${this.operationsScriptPath}" ${operation} '${escapedParams}'`
       );
       
       return { stdout, stderr };
@@ -1161,17 +1229,26 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleCreateScene(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
     if (!args.scenePath) {
       return this.createErrorResponse(
         'Scene path is required',
-        ['Provide a valid path where the scene file will be saved']
+        [
+          'Provide a valid path where the scene file will be saved',
+          'Use parameter "scenePath" or "scene_path"'
+        ]
       );
     }
 
@@ -1215,6 +1292,51 @@ class GodotServer {
         );
       }
       
+      // Add a verification loop to check if the file is visible in the file system
+      const scenePath = join(args.projectPath, args.scenePath);
+      let fileExists = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+      
+      this.logDebug(`Verifying scene file creation at: ${scenePath}`);
+      
+      while (!fileExists && attempts < maxAttempts) {
+        fileExists = existsSync(scenePath);
+        if (!fileExists) {
+          this.logDebug(`Scene file not yet visible, waiting... (attempt ${attempts + 1}/${maxAttempts})`);
+          // Wait for 100ms
+          await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
+        }
+      }
+      
+      if (!fileExists) {
+        this.logDebug(`Scene file still not visible after ${maxAttempts} attempts`);
+        
+        // Check if the output indicates success but the file isn't visible
+        if (stdout.includes("Scene created successfully")) {
+          return this.createErrorResponse(
+            `Scene was reported as created but could not be verified: ${args.scenePath}`,
+            [
+              'The scene may have been created but is not yet visible to the file system',
+              'Try running the save_scene operation to ensure the file is properly saved',
+              'Check if there are file system permission issues or path resolution problems'
+            ]
+          );
+        } else {
+          return this.createErrorResponse(
+            `Failed to create scene: ${args.scenePath}`,
+            [
+              'The operation did not report an error, but the scene file was not created',
+              'Check the Godot output for more details',
+              'Verify that the project path and scene path are correct'
+            ]
+          );
+        }
+      }
+      
+      this.logDebug(`Scene file verified at: ${scenePath}`);
+      
       return {
         content: [
           {
@@ -1240,10 +1362,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleAddNode(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.nodeType || !args.nodeName) {
       return this.createErrorResponse(
         'Missing required parameters',
-        ['Provide projectPath, scenePath, nodeType, and nodeName']
+        [
+          'Provide projectPath, scenePath, nodeType, and nodeName',
+          'Both camelCase and snake_case parameter names are supported'
+        ]
       );
     }
 
@@ -1279,6 +1407,17 @@ class GodotServer {
         );
       }
 
+      // Get the modification time of the scene file before the operation
+      let statsBefore = null;
+      if (existsSync(scenePath)) {
+        const fs = await import('fs/promises');
+        const stats = await fs.stat(scenePath);
+        statsBefore = { mtime: stats.mtime };
+        this.logDebug(`Scene file modification time before operation: ${statsBefore.mtime}`);
+      } else {
+        this.logDebug(`Scene file does not exist before operation: ${scenePath}`);
+      }
+
       // Prepare parameters for the operation
       const params: OperationParams = {
         scene_path: args.scenePath,
@@ -1309,6 +1448,51 @@ class GodotServer {
         );
       }
       
+      // Verify that the scene file was updated
+      let fileUpdated = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+      
+      this.logDebug(`Verifying scene file update at: ${scenePath}`);
+      
+      while (!fileUpdated && attempts < maxAttempts) {
+        if (existsSync(scenePath)) {
+          // Check if the modification time has changed
+          const fs = await import('fs/promises');
+          const statsAfter = await fs.stat(scenePath);
+          
+          if (statsBefore === null || statsAfter.mtime.getTime() > statsBefore.mtime.getTime()) {
+            fileUpdated = true;
+            this.logDebug(`Scene file updated: ${scenePath}`);
+            this.logDebug(`New modification time: ${statsAfter.mtime}`);
+          } else {
+            this.logDebug(`Scene file not yet updated, waiting... (attempt ${attempts + 1}/${maxAttempts})`);
+            // Wait for 100ms
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+          }
+        } else {
+          this.logDebug(`Scene file no longer exists, this is unexpected: ${scenePath}`);
+          break;
+        }
+      }
+      
+      if (!fileUpdated) {
+        this.logDebug(`Scene file update could not be verified after ${maxAttempts} attempts`);
+        
+        // Check if the output indicates success but the file wasn't updated
+        if (stdout.includes("Node added") || stdout.includes("added successfully")) {
+          return this.createErrorResponse(
+            `Node was reported as added but scene file update could not be verified: ${args.scenePath}`,
+            [
+              'The node may have been added but the scene file was not properly updated',
+              'Try running the save_scene operation to ensure the file is properly saved',
+              'Check if there are file system permission issues or path resolution problems'
+            ]
+          );
+        }
+      }
+      
       return {
         content: [
           {
@@ -1334,10 +1518,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleLoadSprite(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.nodePath || !args.texturePath) {
       return this.createErrorResponse(
         'Missing required parameters',
-        ['Provide projectPath, scenePath, nodePath, and texturePath']
+        [
+          'Provide projectPath, scenePath, nodePath, and texturePath',
+          'Both camelCase and snake_case parameter names are supported'
+        ]
       );
     }
 
@@ -1432,10 +1622,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleExportMeshLibrary(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.outputPath) {
       return this.createErrorResponse(
         'Missing required parameters',
-        ['Provide projectPath, scenePath, and outputPath']
+        [
+          'Provide projectPath, scenePath, and outputPath',
+          'Both camelCase and snake_case parameter names are supported'
+        ]
       );
     }
 
@@ -1528,10 +1724,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleSaveScene(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath) {
       return this.createErrorResponse(
         'Missing required parameters',
-        ['Provide projectPath and scenePath']
+        [
+          'Provide projectPath and scenePath',
+          'Both camelCase and snake_case parameter names are supported'
+        ]
       );
     }
 
@@ -1634,17 +1836,26 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleGetUid(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
     if (!args.filePath) {
       return this.createErrorResponse(
         'File path is required',
-        ['Provide a valid path to the file for which to get the UID']
+        [
+          'Provide a valid path to the file for which to get the UID',
+          'Use parameter "filePath" or "file_path"'
+        ]
       );
     }
 
@@ -1739,10 +1950,16 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleUpdateProjectUids(args: any) {
+    // Normalize parameter names (snake_case to camelCase)
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
-        ['Provide a valid path to a Godot project directory']
+        [
+          'Provide a valid path to a Godot project directory',
+          'Use parameter "projectPath" or "project_path"'
+        ]
       );
     }
 
