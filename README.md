@@ -1,6 +1,6 @@
 # Godot MCP
 
-```
+```text
                            (((((((             (((((((                          
                         (((((((((((           (((((((((((                      
                         (((((((((((((       (((((((((((((                       
@@ -63,6 +63,9 @@ This direct feedback loop helps AI assistants like Claude understand what works 
   - Load sprites and textures into Sprite2D nodes
   - Export 3D scenes as MeshLibrary resources for GridMap
   - Save scenes with options for creating variants
+- **UID Management** (for Godot 4.4+):
+  - Get UID for specific files
+  - Update UID references by resaving resources
 
 ## Requirements
 
@@ -95,6 +98,9 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
     "godot": {
       "command": "node",
       "args": ["/absolute/path/to/godot-mcp/build/index.js"],
+      "env": {
+        "DEBUG": "true"                  // Optional: Enable detailed logging
+      },
       "disabled": false,
       "autoApprove": [
         "launch_editor",
@@ -108,7 +114,9 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
         "add_node",
         "load_sprite",
         "export_mesh_library",
-        "save_scene"
+        "save_scene",
+        "get_uid",
+        "update_project_uids"
       ]
     }
   }
@@ -137,7 +145,10 @@ Create a file at `.cursor/mcp.json` in your project directory with the following
   "mcpServers": {
     "godot": {
       "command": "node",
-      "args": ["/absolute/path/to/godot-mcp/build/index.js"]
+      "args": ["/absolute/path/to/godot-mcp/build/index.js"],
+      "env": {
+        "DEBUG": "true"                  // Enable detailed logging
+      }
     }
   }
 }
@@ -146,14 +157,15 @@ Create a file at `.cursor/mcp.json` in your project directory with the following
 ### Step 3: Optional Environment Variables
 
 You can customize the server behavior with these environment variables:
+
 - `GODOT_PATH`: Path to the Godot executable (overrides automatic detection)
-- `DEBUG`: Set to "true" to enable debug logging
+- `DEBUG`: Set to "true" to enable detailed server-side debug logging
 
 ## Example Prompts
 
 Once configured, your AI assistant will automatically run the MCP server when needed. You can use prompts like:
 
-```
+```text
 "Launch the Godot editor for my project at /path/to/project"
 
 "Run my Godot project and show me any errors"
@@ -173,6 +185,10 @@ Once configured, your AI assistant will automatically run the MCP server when ne
 "Export my 3D models as a MeshLibrary for use with GridMap"
 
 "Create a UI scene with buttons and labels for my game's main menu"
+
+"Get the UID for a specific script file in my Godot 4.4 project"
+
+"Update UID references in my Godot project after upgrading to 4.4"
 ```
 
 ## Implementation Details

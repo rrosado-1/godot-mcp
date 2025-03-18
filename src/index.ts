@@ -7,6 +7,13 @@
  * capture debug output, and control project execution.
  */
 
+import { fileURLToPath } from 'url';
+import { join, dirname, basename } from 'path';
+import { existsSync, readdirSync, mkdirSync } from 'fs';
+import { spawn } from 'child_process';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -15,13 +22,16 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'child_process';
-import { promisify } from 'util';
-import { exec } from 'child_process';
-import { existsSync, readdirSync, mkdirSync } from 'fs';
-import { join, dirname, basename } from 'path';
+
+// Check if debug mode is enabled
+const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
+const GODOT_DEBUG_MODE: boolean = true; // Always use GODOT DEBUG MODE
 
 const execAsync = promisify(exec);
+
+// Derive __filename and __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Interface representing a running Godot process
@@ -38,6 +48,7 @@ interface GodotProcess {
 interface GodotServerConfig {
   godotPath?: string;
   debugMode?: boolean;
+  godotDebugMode?: boolean;
 }
 
 /**
@@ -54,33 +65,53 @@ class GodotServer {
   private server: Server;
   private activeProcess: GodotProcess | null = null;
   private godotPath: string = '/Applications/Godot.app/Contents/MacOS/Godot'; // Default for macOS
-  private debugMode: boolean = false;
   private operationsScriptPath: string;
+  
+  /**
+   * Parameter name mappings from snake_case to camelCase
+   * This allows the server to accept both formats
+   */
+  private parameterMappings: Record<string, string> = {
+    'project_path': 'projectPath',
+    'scene_path': 'scenePath',
+    'root_node_type': 'rootNodeType',
+    'parent_node_path': 'parentNodePath',
+    'node_type': 'nodeType',
+    'node_name': 'nodeName',
+    'texture_path': 'texturePath',
+    'node_path': 'nodePath',
+    'output_path': 'outputPath',
+    'mesh_item_names': 'meshItemNames',
+    'new_path': 'newPath',
+    'file_path': 'filePath'
+  };
 
   constructor(config?: GodotServerConfig) {
     // Apply configuration if provided
+    let debugMode = DEBUG_MODE;
+    let godotDebugMode = GODOT_DEBUG_MODE;
+    
     if (config) {
       if (config.godotPath) {
         this.godotPath = config.godotPath;
       }
       if (config.debugMode !== undefined) {
-        this.debugMode = config.debugMode;
+        debugMode = config.debugMode;
+      }
+      if (config.godotDebugMode !== undefined) {
+        godotDebugMode = config.godotDebugMode;
       }
     }
 
     // Apply environment variables (override config)
     if (process.env.GODOT_PATH) {
       this.godotPath = process.env.GODOT_PATH;
-      this.logDebug(`Using Godot path from environment: ${this.godotPath}`);
-    }
-    if (process.env.DEBUG === 'true') {
-      this.debugMode = true;
-      this.logDebug('Debug mode enabled from environment');
+      if (debugMode) console.debug(`[SERVER] Using Godot path from environment: ${this.godotPath}`);
     }
     
     // Set the path to the operations script
     this.operationsScriptPath = join(__dirname, 'scripts', 'godot_operations.gd');
-    this.logDebug(`Operations script path: ${this.operationsScriptPath}`);
+    if (debugMode) console.debug(`[DEBUG] Operations script path: ${this.operationsScriptPath}`);
 
     // Initialize the MCP server
     this.server = new Server(
@@ -115,8 +146,8 @@ class GodotServer {
    * Log debug messages if debug mode is enabled
    */
   private logDebug(message: string): void {
-    if (this.debugMode) {
-      console.log(`[DEBUG] ${message}`);
+    if (DEBUG_MODE) {
+      console.debug(`[DEBUG] ${message}`);
     }
   }
 
@@ -124,6 +155,12 @@ class GodotServer {
    * Create a standardized error response with possible solutions
    */
   private createErrorResponse(message: string, possibleSolutions: string[] = []): any {
+    // Log the error
+    console.error(`[SERVER] Error response: ${message}`);
+    if (possibleSolutions.length > 0) {
+      console.error(`[SERVER] Possible solutions: ${possibleSolutions.join(', ')}`);
+    }
+    
     const response: any = {
       content: [
         {
@@ -210,9 +247,9 @@ class GodotServer {
 
     this.logDebug(`Warning: Could not find Godot in common locations for ${platform}`);
     this.logDebug(`Using default path: ${this.godotPath}, but this may not work.`);
-    console.error(`Warning: Could not find Godot in common locations for ${platform}`);
-    console.error(`Using default path: ${this.godotPath}, but this may not work.`);
-    console.error('Set GODOT_PATH environment variable to specify the correct path.');
+    console.warn(`[SERVER] Could not find Godot in common locations for ${platform}`);
+    console.warn(`[SERVER] Using default path: ${this.godotPath}, but this may not work.`);
+    console.warn('[SERVER] Set GODOT_PATH environment variable to specify the correct path.');
   }
 
   /**
@@ -461,6 +498,38 @@ class GodotServer {
             required: ['projectPath', 'scenePath'],
           },
         },
+        {
+          name: 'get_uid',
+          description: 'Get the UID for a specific file in a Godot project (for Godot 4.4+)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+              filePath: {
+                type: 'string',
+                description: 'Path to the file (relative to project) for which to get the UID',
+              },
+            },
+            required: ['projectPath', 'filePath'],
+          },
+        },
+        {
+          name: 'update_project_uids',
+          description: 'Update UID references in a Godot project by resaving resources (for Godot 4.4+)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              projectPath: {
+                type: 'string',
+                description: 'Path to the Godot project directory',
+              },
+            },
+            required: ['projectPath'],
+          },
+        },
       ],
     }));
 
@@ -492,6 +561,10 @@ class GodotServer {
           return await this.handleExportMeshLibrary(request.params.arguments);
         case 'save_scene':
           return await this.handleSaveScene(request.params.arguments);
+        case 'get_uid':
+          return await this.handleGetUid(request.params.arguments);
+        case 'update_project_uids':
+          return await this.handleUpdateProjectUids(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -499,6 +572,73 @@ class GodotServer {
           );
       }
     });
+  }
+
+  /**
+   * Check if the Godot version is 4.4 or later
+   * @param version The Godot version string
+   * @returns True if the version is 4.4 or later
+   */
+  private isGodot44OrLater(version: string): boolean {
+    const match = version.match(/^(\d+)\.(\d+)/);
+    if (match) {
+      const major = parseInt(match[1], 10);
+      const minor = parseInt(match[2], 10);
+      return major > 4 || (major === 4 && minor >= 4);
+    }
+    return false;
+  }
+
+  /**
+   * Execute a Godot operation using the operations script
+   * @param operation The operation to execute
+   * @param params The parameters for the operation
+   * @param projectPath The path to the Godot project
+   * @returns The stdout and stderr from the operation
+   */
+  private async executeOperation(
+    operation: string, 
+    params: OperationParams, 
+    projectPath: string
+  ): Promise<{stdout: string, stderr: string}> {
+    this.logDebug(`Executing operation: ${operation} in project: ${projectPath}`);
+    this.logDebug(`Operation params: ${JSON.stringify(params)}`);
+    
+    try {
+      // Escape single quotes in the JSON string to prevent command injection
+      const escapedParams = JSON.stringify(params).replace(/'/g, "'\\''");
+      
+      // Add debug arguments if debug mode is enabled
+      const debugArgs = GODOT_DEBUG_MODE ? ["--debug-godot"] : [];
+      
+      const cmd = [
+        `"${this.godotPath}"`,
+        '--headless',
+        '--script',
+        `"${this.operationsScriptPath}"`,
+        operation,
+        `'${escapedParams}'`,
+        '--path',
+        `"${projectPath}"`,
+        ...debugArgs
+      ].join(' ');
+      
+      this.logDebug(`Command: ${cmd}`);
+      
+      const { stdout, stderr } = await execAsync(cmd);
+      
+      return { stdout, stderr };
+    } catch (error: any) {
+      // If execAsync throws, it still contains stdout/stderr
+      if (error.stdout !== undefined && error.stderr !== undefined) {
+        return { 
+          stdout: error.stdout,
+          stderr: error.stderr
+        };
+      }
+      
+      throw error;
+    }
   }
 
   /**
@@ -614,9 +754,9 @@ class GodotServer {
       process.stdout.on('data', (data) => {
         const lines = data.toString().split('\n');
         output.push(...lines);
-        if (this.debugMode) {
+        if (DEBUG_MODE) {
           lines.forEach((line: string) => {
-            if (line.trim()) this.logDebug(`[Godot stdout] ${line}`);
+            if (line.trim()) console.debug(`[DEBUG] [Godot stdout] ${line}`);
           });
         }
       });
@@ -624,9 +764,9 @@ class GodotServer {
       process.stderr.on('data', (data) => {
         const lines = data.toString().split('\n');
         errors.push(...lines);
-        if (this.debugMode) {
+        if (DEBUG_MODE) {
           lines.forEach((line: string) => {
-            if (line.trim()) this.logDebug(`[Godot stderr] ${line}`);
+            if (line.trim()) console.debug(`[DEBUG] [Godot stderr] ${line}`);
           });
         }
       });
@@ -878,78 +1018,6 @@ class GodotServer {
   }
 
   /**
-   * Handle the get_project_info tool
-   * @param args Tool arguments
-   */
-  private async handleGetProjectInfo(args: any) {
-    if (!args.projectPath) {
-      return this.createErrorResponse(
-        'Project path is required',
-        ['Provide a valid path to a Godot project directory']
-      );
-    }
-
-    if (!this.validatePath(args.projectPath)) {
-      return this.createErrorResponse(
-        'Invalid project path',
-        ['Provide a valid path without ".." or other potentially unsafe characters']
-      );
-    }
-
-    try {
-      // Check if the project directory exists and contains a project.godot file
-      const projectFile = join(args.projectPath, 'project.godot');
-      if (!existsSync(projectFile)) {
-        return this.createErrorResponse(
-          `Not a valid Godot project: ${args.projectPath}`,
-          [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects'
-          ]
-        );
-      }
-
-      this.logDebug(`Getting project info for: ${args.projectPath}`);
-      
-      // Read project.godot file to extract metadata
-      // This is a simplified implementation - in a real implementation,
-      // you would parse the project.godot file to extract more detailed information
-      const { stdout } = await execAsync(`"${this.godotPath}" --path "${args.projectPath}" --version-project`);
-      
-      // Get additional project information
-      const projectName = basename(args.projectPath);
-      const projectStructure = await this.getProjectStructure(args.projectPath);
-      
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                name: projectName,
-                path: args.projectPath,
-                godotVersion: stdout.trim(),
-                structure: projectStructure
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    } catch (error: any) {
-      return this.createErrorResponse(
-        `Failed to get project info: ${error?.message || 'Unknown error'}`,
-        [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible'
-        ]
-      );
-    }
-  }
-
-  /**
    * Get the structure of a Godot project
    * @param projectPath Path to the Godot project
    * @returns Object representing the project structure
@@ -1001,41 +1069,75 @@ class GodotServer {
     }
   }
 
-
   /**
-   * Execute a Godot operation using the operations script
-   * @param operation The operation to execute
-   * @param params The parameters for the operation
-   * @param projectPath Path to the Godot project
-   * @returns Output from Godot
+   * Handle the get_project_info tool
+   * @param args Tool arguments
    */
-  private async executeOperation(
-    operation: string, 
-    params: OperationParams, 
-    projectPath: string
-  ): Promise<{stdout: string, stderr: string}> {
-    this.logDebug(`Executing operation: ${operation} in project: ${projectPath}`);
-    this.logDebug(`Operation params: ${JSON.stringify(params)}`);
-    
-    try {
-      // Escape single quotes in the JSON string to prevent command injection
-      const escapedParams = JSON.stringify(params).replace(/'/g, "'\\''");
-      
-      const { stdout, stderr } = await execAsync(
-        `"${this.godotPath}" --headless --script "${this.operationsScriptPath}" ${operation} '${escapedParams}' --path "${projectPath}"`
+  private async handleGetProjectInfo(args: any) {
+    if (!args.projectPath) {
+      return this.createErrorResponse(
+        'Project path is required',
+        ['Provide a valid path to a Godot project directory']
       );
-      
-      return { stdout, stderr };
-    } catch (error: any) {
-      // If execAsync throws, it still contains stdout/stderr
-      if (error.stdout !== undefined && error.stderr !== undefined) {
-        return { 
-          stdout: error.stdout,
-          stderr: error.stderr
-        };
+    }
+
+    if (!this.validatePath(args.projectPath)) {
+      return this.createErrorResponse(
+        'Invalid project path',
+        ['Provide a valid path without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
       }
+
+      this.logDebug(`Getting project info for: ${args.projectPath}`);
       
-      throw error;
+      // Read project.godot file to extract metadata
+      // This is a simplified implementation - in a real implementation,
+      // you would parse the project.godot file to extract more detailed information
+      const { stdout } = await execAsync(`"${this.godotPath}" --headless --path "${args.projectPath}" --version-project`);
+      
+      // Get additional project information
+      const projectName = basename(args.projectPath);
+      const projectStructure = await this.getProjectStructure(args.projectPath);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                name: projectName,
+                path: args.projectPath,
+                godotVersion: stdout.trim(),
+                structure: projectStructure
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to get project info: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
     }
   }
 
@@ -1503,6 +1605,180 @@ class GodotServer {
     } catch (error: any) {
       return this.createErrorResponse(
         `Failed to save scene: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the get_uid tool
+   * @param args Tool arguments
+   */
+  private async handleGetUid(args: any) {
+    if (!args.projectPath || !args.filePath) {
+      return this.createErrorResponse(
+        'Missing required parameters',
+        ['Provide projectPath and filePath']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath) || !this.validatePath(args.filePath)) {
+      return this.createErrorResponse(
+        'Invalid path',
+        ['Provide valid paths without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Check if the file exists
+      const filePath = join(args.projectPath, args.filePath);
+      if (!existsSync(filePath)) {
+        return this.createErrorResponse(
+          `File does not exist: ${args.filePath}`,
+          [
+            'Ensure the file path is correct'
+          ]
+        );
+      }
+
+      // Get Godot version to check if UIDs are supported
+      const { stdout: versionOutput } = await execAsync(`"${this.godotPath}" --version`);
+      const version = versionOutput.trim();
+      
+      if (!this.isGodot44OrLater(version)) {
+        return this.createErrorResponse(
+          `UIDs are only supported in Godot 4.4 or later. Current version: ${version}`,
+          [
+            'Upgrade to Godot 4.4 or later to use UIDs',
+            'Use resource paths instead of UIDs for this version of Godot'
+          ]
+        );
+      }
+
+      // Prepare parameters for the operation
+      const params = {
+        file_path: args.filePath
+      };
+      
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('get_uid', params, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to get UID: ${stderr}`,
+          [
+            'Check if the file is a valid Godot resource',
+            'Ensure the file path is correct'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `UID for ${args.filePath}: ${stdout.trim()}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to get UID: ${error?.message || 'Unknown error'}`,
+        [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible'
+        ]
+      );
+    }
+  }
+
+  /**
+   * Handle the update_project_uids tool
+   * @param args Tool arguments
+   */
+  private async handleUpdateProjectUids(args: any) {
+    if (!args.projectPath) {
+      return this.createErrorResponse(
+        'Project path is required',
+        ['Provide a valid path to a Godot project directory']
+      );
+    }
+
+    if (!this.validatePath(args.projectPath)) {
+      return this.createErrorResponse(
+        'Invalid project path',
+        ['Provide a valid path without ".." or other potentially unsafe characters']
+      );
+    }
+
+    try {
+      // Check if the project directory exists and contains a project.godot file
+      const projectFile = join(args.projectPath, 'project.godot');
+      if (!existsSync(projectFile)) {
+        return this.createErrorResponse(
+          `Not a valid Godot project: ${args.projectPath}`,
+          [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects'
+          ]
+        );
+      }
+
+      // Get Godot version to check if UIDs are supported
+      const { stdout: versionOutput } = await execAsync(`"${this.godotPath}" --version`);
+      const version = versionOutput.trim();
+      
+      if (!this.isGodot44OrLater(version)) {
+        return this.createErrorResponse(
+          `UIDs are only supported in Godot 4.4 or later. Current version: ${version}`,
+          [
+            'Upgrade to Godot 4.4 or later to use UIDs',
+            'Use resource paths instead of UIDs for this version of Godot'
+          ]
+        );
+      }
+
+      // Execute the operation
+      const { stdout, stderr } = await this.executeOperation('update_project_uids', {}, args.projectPath);
+      
+      if (stderr && stderr.includes("Failed to")) {
+        return this.createErrorResponse(
+          `Failed to update project UIDs: ${stderr}`,
+          [
+            'Check if the project is valid',
+            'Ensure you have write permissions to the project files'
+          ]
+        );
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Project UIDs updated successfully.\n\nOutput: ${stdout}`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return this.createErrorResponse(
+        `Failed to update project UIDs: ${error?.message || 'Unknown error'}`,
         [
           'Ensure Godot is installed correctly',
           'Check if the GODOT_PATH environment variable is set correctly',
