@@ -98,6 +98,9 @@ Add to your Cline MCP settings file (`~/Library/Application Support/Code/User/gl
     "godot": {
       "command": "node",
       "args": ["/absolute/path/to/godot-mcp/build/index.js"],
+      "env": {
+        "DEBUG": "true"                  // Optional: Enable detailed logging
+      },
       "disabled": false,
       "autoApprove": [
         "launch_editor",
@@ -142,7 +145,10 @@ Create a file at `.cursor/mcp.json` in your project directory with the following
   "mcpServers": {
     "godot": {
       "command": "node",
-      "args": ["/absolute/path/to/godot-mcp/build/index.js"]
+      "args": ["/absolute/path/to/godot-mcp/build/index.js"],
+      "env": {
+        "DEBUG": "true"                  // Enable detailed logging
+      }
     }
   }
 }
@@ -153,7 +159,7 @@ Create a file at `.cursor/mcp.json` in your project directory with the following
 You can customize the server behavior with these environment variables:
 
 - `GODOT_PATH`: Path to the Godot executable (overrides automatic detection)
-- `DEBUG`: Set to "true" to enable debug logging
+- `DEBUG`: Set to "true" to enable detailed server-side debug logging
 
 ## Example Prompts
 
