@@ -25,7 +25,7 @@ import {
 
 // Check if debug mode is enabled
 const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
-const GODOT_DEBUG_MODE: boolean = process.env.GODOT_DEBUG === 'true' || DEBUG_MODE;
+const GODOT_DEBUG_MODE: boolean = true; // Always use GODOT DEBUG MODE
 
 const execAsync = promisify(exec);
 

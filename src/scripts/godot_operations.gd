@@ -246,23 +246,23 @@ func create_scene(params):
         print("Root node type: " + root_node_type)
     
     # Create the root node
-    var root = instantiate_class(root_node_type)
-    if not root:
+    var scene_root = instantiate_class(root_node_type)
+    if not scene_root:
         printerr("Failed to instantiate node of type: " + root_node_type)
         printerr("Make sure the class exists and can be instantiated")
         printerr("Check if the class is registered in ClassDB or available as a script")
         quit(1)
     
-    root.name = "root"
+    scene_root.name = "root"
     if debug_mode:
-        print("Root node created with name: " + root.name)
+        print("Root node created with name: " + scene_root.name)
     
     # Set the owner of the root node to itself (important for scene saving)
-    root.owner = root
+    scene_root.owner = scene_root
     
     # Pack the scene
     var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
+    var result = packed_scene.pack(scene_root)
     if debug_mode:
         print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
     
@@ -489,7 +489,7 @@ func add_node(params):
     
     if debug_mode:
         print("Scene loaded successfully")
-    var root = scene.instantiate()
+    var scene_root = scene.instantiate()
     if debug_mode:
         print("Scene instantiated")
     
@@ -500,9 +500,9 @@ func add_node(params):
     if debug_mode:
         print("Parent path: " + parent_path)
     
-    var parent = root
+    var parent = scene_root
     if parent_path != "root":
-        parent = root.get_node(parent_path.replace("root/", ""))
+        parent = scene_root.get_node(parent_path.replace("root/", ""))
         if not parent:
             printerr("Parent node not found: " + parent_path)
             quit(1)
@@ -531,12 +531,12 @@ func add_node(params):
             new_node.set(property, properties[property])
     
     parent.add_child(new_node)
-    new_node.owner = root
+    new_node.owner = scene_root
     if debug_mode:
         print("Node added to parent and ownership set")
     
     var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
+    var result = packed_scene.pack(scene_root)
     if debug_mode:
         print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
     
@@ -603,7 +603,7 @@ func load_sprite(params):
         print("Scene loaded successfully")
     
     # Instance the scene
-    var root = scene.instantiate()
+    var scene_root = scene.instantiate()
     if debug_mode:
         print("Scene instantiated")
     
@@ -620,11 +620,11 @@ func load_sprite(params):
     var sprite_node = null
     if node_path == "":
         # If no node path, assume root is the sprite
-        sprite_node = root
+        sprite_node = scene_root
         if debug_mode:
             print("Using root node as sprite node")
     else:
-        sprite_node = root.get_node(node_path)
+        sprite_node = scene_root.get_node(node_path)
         if sprite_node and debug_mode:
             print("Found sprite node: " + sprite_node.name)
     
@@ -662,7 +662,7 @@ func load_sprite(params):
     
     # Save the modified scene
     var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
+    var result = packed_scene.pack(scene_root)
     if debug_mode:
         print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
     
@@ -737,7 +737,7 @@ func export_mesh_library(params):
         print("Scene loaded successfully")
     
     # Instance the scene
-    var root = scene.instantiate()
+    var scene_root = scene.instantiate()
     if debug_mode:
         print("Scene instantiated")
     
@@ -761,7 +761,7 @@ func export_mesh_library(params):
     if debug_mode:
         print("Processing child nodes...")
     
-    for child in root.get_children():
+    for child in scene_root.get_children():
         if debug_mode:
             print("Checking child node: " + child.name)
         
@@ -946,10 +946,9 @@ func get_uid(params):
             "uid": uid_content.strip_edges(),
             "exists": true
         }
-        var json = JSON.new()
         if debug_mode:
-            print("UID result: " + json.stringify(result))
-        print(json.stringify(result))
+            print("UID result: " + JSON.stringify(result))
+        print(JSON.stringify(result))
     else:
         if debug_mode:
             print("UID file does not exist or could not be opened")
@@ -961,10 +960,9 @@ func get_uid(params):
             "exists": false,
             "message": "UID file does not exist for this file. Use resave_resources to generate UIDs."
         }
-        var json = JSON.new()
         if debug_mode:
-            print("UID result: " + json.stringify(result))
-        print(json.stringify(result))
+            print("UID result: " + JSON.stringify(result))
+        print(JSON.stringify(result))
 
 # Resave all resources to update UID references
 func resave_resources(params):
@@ -1128,7 +1126,7 @@ func save_scene(params):
         print("Scene loaded successfully")
     
     # Instance the scene
-    var root = scene.instantiate()
+    var scene_root = scene.instantiate()
     if debug_mode:
         print("Scene instantiated")
     
@@ -1162,7 +1160,7 @@ func save_scene(params):
     
     # Create a packed scene
     var packed_scene = PackedScene.new()
-    var result = packed_scene.pack(root)
+    var result = packed_scene.pack(scene_root)
     if debug_mode:
         print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
     
