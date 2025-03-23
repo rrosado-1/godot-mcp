@@ -436,6 +436,7 @@ class GodotServer {
     const snakeCaseParams = this.convertCamelToSnakeCase(params);
     this.logDebug(`Converted snake_case params: ${JSON.stringify(snakeCaseParams)}`);
 
+
     // Ensure godotPath is set
     if (!this.godotPath) {
       await this.detectGodotPath();
@@ -447,6 +448,7 @@ class GodotServer {
     try {
       // Escape single quotes in the JSON string to prevent command injection
       const escapedParams = JSON.stringify(snakeCaseParams).replace(/'/g, "'\\''");
+
 
       // Add debug arguments if debug mode is enabled
       const debugArgs = GODOT_DEBUG_MODE ? ['--debug-godot'] : [];
