@@ -1070,6 +1070,57 @@ class GodotServer {
   }
 
   /**
+   * Get the structure of a Godot project asynchronously by counting files recursively
+   * @param projectPath Path to the Godot project
+   * @returns Promise resolving to an object with counts of scenes, scripts, assets, and other files
+   */
+  private getProjectStructureAsync(projectPath: string): Promise<any> {
+    return new Promise((resolve) => {
+      try {
+        const structure = {
+          scenes: 0,
+          scripts: 0,
+          assets: 0,
+          other: 0
+        };
+
+        const scanDirectory = (currentPath: string) => {
+          const entries = readdirSync(currentPath, { withFileTypes: true });
+
+          for (const entry of entries) {
+            const fullPath = join(currentPath, entry.name);
+
+            if (entry.isDirectory()) {
+              // Skip hidden directories (e.g., .git)
+              if (!entry.name.startsWith('.')) {
+                scanDirectory(fullPath); // Recursively scan subdirectory
+              }
+            } else if (entry.isFile()) {
+              // Categorize based on file extension
+              const ext = entry.name.split('.').pop()?.toLowerCase();
+              if (ext === 'tscn') {
+                structure.scenes++;
+              } else if (ext === 'gd') {
+                structure.scripts++;
+              } else if (['png', 'jpg', 'jpeg', 'svg', 'tres', 'ogg', 'wav', 'mp3', 'obj', 'mtl', 'glb', 'gltf'].includes(ext || '')) {
+                structure.assets++;
+              } else {
+                structure.other++;
+              }
+            }
+          }
+        };
+
+        scanDirectory(projectPath);
+        resolve(structure);
+      } catch (error) {
+        this.logDebug(`Error getting project structure: ${error}`);
+        resolve({ error: 'Failed to get project structure' });
+      }
+    });
+  }
+
+  /**
    * Handle the get_project_info tool
    * @param args Tool arguments
    */
@@ -1089,6 +1140,20 @@ class GodotServer {
     }
 
     try {
+      // Ensure godotPath is set
+      if (!this.godotPath) {
+        await this.detectGodotPath();
+        if (!this.godotPath) {
+          return this.createErrorResponse(
+            'Could not find a valid Godot executable path',
+            [
+              'Ensure Godot is installed correctly',
+              'Set GODOT_PATH environment variable to specify the correct path'
+            ]
+          );
+        }
+      }
+
       // Check if the project directory exists and contains a project.godot file
       const projectFile = join(args.projectPath, 'project.godot');
       if (!existsSync(projectFile)) {
@@ -1103,14 +1168,28 @@ class GodotServer {
 
       this.logDebug(`Getting project info for: ${args.projectPath}`);
       
-      // Read project.godot file to extract metadata
-      // This is a simplified implementation - in a real implementation,
-      // you would parse the project.godot file to extract more detailed information
-      const { stdout } = await execAsync(`"${this.godotPath}" --headless --path "${args.projectPath}" --version-project`);
+      // Get Godot version instead of project version
+      // This avoids the hanging issue with --version-project flag
+      const execOptions = { timeout: 10000 }; // 10 second timeout
+      const { stdout } = await execAsync(`"${this.godotPath}" --version`, execOptions);
       
-      // Get additional project information
-      const projectName = basename(args.projectPath);
-      const projectStructure = await this.getProjectStructure(args.projectPath);
+      // Get project structure asynchronously
+      const projectStructure = await this.getProjectStructureAsync(args.projectPath);
+      
+      // Try to extract project name from project.godot file
+      let projectName = basename(args.projectPath);
+      try {
+        const fs = require('fs');
+        const projectFileContent = fs.readFileSync(projectFile, 'utf8');
+        const configNameMatch = projectFileContent.match(/config\/name="([^"]+)"/);
+        if (configNameMatch && configNameMatch[1]) {
+          projectName = configNameMatch[1];
+          this.logDebug(`Found project name in config: ${projectName}`);
+        }
+      } catch (error) {
+        this.logDebug(`Error reading project file: ${error}`);
+        // Continue with the default project name
+      }
       
       return {
         content: [
