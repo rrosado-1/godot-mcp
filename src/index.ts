@@ -71,7 +71,7 @@ class GodotServer {
   private strictPathValidation: boolean = false;
 
   /**
-   * Parameter name mappings from snake_case to camelCase
+   * Parameter name mappings between snake_case and camelCase
    * This allows the server to accept both formats
    */
   private parameterMappings: Record<string, string> = {
@@ -87,9 +87,22 @@ class GodotServer {
     'mesh_item_names': 'meshItemNames',
     'new_path': 'newPath',
     'file_path': 'filePath',
+    'directory': 'directory',
+    'recursive': 'recursive',
+    'scene': 'scene',
   };
 
+  /**
+   * Reverse mapping from camelCase to snake_case
+   * Generated from parameterMappings for quick lookups
+   */
+  private reverseParameterMappings: Record<string, string> = {};
+
   constructor(config?: GodotServerConfig) {
+    // Initialize reverse parameter mappings
+    for (const [snakeCase, camelCase] of Object.entries(this.parameterMappings)) {
+      this.reverseParameterMappings[camelCase] = snakeCase;
+    }
     // Apply configuration if provided
     let debugMode = DEBUG_MODE;
     let godotDebugMode = GODOT_DEBUG_MODE;
@@ -393,6 +406,39 @@ class GodotServer {
   }
 
   /**
+   * Normalize parameters to camelCase format
+   * @param params Object with either snake_case or camelCase keys
+   * @returns Object with all keys in camelCase format
+   */
+  private normalizeParameters(params: OperationParams): OperationParams {
+    if (!params || typeof params !== 'object') {
+      return params;
+    }
+    
+    const result: OperationParams = {};
+    
+    for (const key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        let normalizedKey = key;
+        
+        // If the key is in snake_case, convert it to camelCase using our mapping
+        if (key.includes('_') && this.parameterMappings[key]) {
+          normalizedKey = this.parameterMappings[key];
+        }
+        
+        // Handle nested objects recursively
+        if (typeof params[key] === 'object' && params[key] !== null && !Array.isArray(params[key])) {
+          result[normalizedKey] = this.normalizeParameters(params[key] as OperationParams);
+        } else {
+          result[normalizedKey] = params[key];
+        }
+      }
+    }
+    
+    return result;
+  }
+
+  /**
    * Convert camelCase keys to snake_case
    * @param params Object with camelCase keys
    * @returns Object with snake_case keys
@@ -403,7 +449,7 @@ class GodotServer {
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
         // Convert camelCase to snake_case
-        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        const snakeKey = this.reverseParameterMappings[key] || key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
         
         // Handle nested objects recursively
         if (typeof params[key] === 'object' && params[key] !== null && !Array.isArray(params[key])) {
@@ -445,21 +491,24 @@ class GodotServer {
     }
 
     try {
+      // Serialize the snake_case parameters to a valid JSON string
+      const paramsJson = JSON.stringify(snakeCaseParams);
       // Escape single quotes in the JSON string to prevent command injection
-      const escapedParams = JSON.stringify(snakeCaseParams).replace(/'/g, "'\\''");
+      const escapedParams = paramsJson.replace(/'/g, "'\\''");
 
       // Add debug arguments if debug mode is enabled
       const debugArgs = GODOT_DEBUG_MODE ? ['--debug-godot'] : [];
 
+      // Construct the command with the operation and JSON parameters
       const cmd = [
         `"${this.godotPath}"`,
         '--headless',
+        '--path',
+        `"${projectPath}"`,
         '--script',
         `"${this.operationsScriptPath}"`,
         operation,
-        `'${escapedParams}'`,
-        '--path',
-        `"${projectPath}"`,
+        `'${escapedParams}'`,  // Pass the JSON string as a single argument
         ...debugArgs,
       ].join(' ');
 
@@ -914,6 +963,9 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleLaunchEditor(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -990,6 +1042,9 @@ class GodotServer {
    * @param args Tool arguments
    */
   private async handleRunProject(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -1201,6 +1256,9 @@ class GodotServer {
    * Handle the list_projects tool
    */
   private async handleListProjects(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.directory) {
       return this.createErrorResponse(
         'Directory is required',
@@ -1312,6 +1370,9 @@ class GodotServer {
    * Handle the get_project_info tool
    */
   private async handleGetProjectInfo(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -1410,6 +1471,9 @@ class GodotServer {
    * Handle the create_scene tool
    */
   private async handleCreateScene(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath) {
       return this.createErrorResponse(
         'Project path and scene path are required',
@@ -1437,10 +1501,10 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (already in camelCase)
       const params = {
-        scene_path: args.scenePath,
-        root_node_type: args.rootNodeType || 'Node2D',
+        scenePath: args.scenePath,
+        rootNodeType: args.rootNodeType || 'Node2D',
       };
 
       // Execute the operation
@@ -1481,6 +1545,9 @@ class GodotServer {
    * Handle the add_node tool
    */
   private async handleAddNode(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.nodeType || !args.nodeName) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1520,16 +1587,16 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (already in camelCase)
       const params: any = {
-        scene_path: args.scenePath,
-        node_type: args.nodeType,
-        node_name: args.nodeName,
+        scenePath: args.scenePath,
+        nodeType: args.nodeType,
+        nodeName: args.nodeName,
       };
 
       // Add optional parameters
       if (args.parentNodePath) {
-        params.parent_node_path = args.parentNodePath;
+        params.parentNodePath = args.parentNodePath;
       }
 
       if (args.properties) {
@@ -1574,6 +1641,9 @@ class GodotServer {
    * Handle the load_sprite tool
    */
   private async handleLoadSprite(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.nodePath || !args.texturePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1630,7 +1700,7 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation (using camelCase)
+      // Prepare parameters for the operation (already in camelCase)
       const params = {
         scenePath: args.scenePath,
         nodePath: args.nodePath,
@@ -1675,6 +1745,9 @@ class GodotServer {
    * Handle the export_mesh_library tool
    */
   private async handleExportMeshLibrary(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath || !args.outputPath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1718,7 +1791,7 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation (using camelCase)
+      // Prepare parameters for the operation (already in camelCase)
       const params: any = {
         scenePath: args.scenePath,
         outputPath: args.outputPath,
@@ -1767,6 +1840,9 @@ class GodotServer {
    * Handle the save_scene tool
    */
   private async handleSaveScene(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.scenePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1814,7 +1890,7 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation (using camelCase)
+      // Prepare parameters for the operation (already in camelCase)
       const params: any = {
         scenePath: args.scenePath,
       };
@@ -1863,6 +1939,9 @@ class GodotServer {
    * Handle the get_uid tool
    */
   private async handleGetUid(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath || !args.filePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1927,7 +2006,7 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation (using camelCase)
+      // Prepare parameters for the operation (already in camelCase)
       const params = {
         filePath: args.filePath,
       };
@@ -1969,6 +2048,9 @@ class GodotServer {
    * Handle the update_project_uids tool
    */
   private async handleUpdateProjectUids(args: any) {
+    // Normalize parameters to camelCase
+    args = this.normalizeParameters(args);
+    
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -2024,7 +2106,7 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation (using camelCase)
+      // Prepare parameters for the operation (already in camelCase)
       const params = {
         projectPath: args.projectPath,
       };
