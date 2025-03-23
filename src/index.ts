@@ -393,6 +393,31 @@ class GodotServer {
   }
 
   /**
+   * Convert camelCase keys to snake_case
+   * @param params Object with camelCase keys
+   * @returns Object with snake_case keys
+   */
+  private convertCamelToSnakeCase(params: OperationParams): OperationParams {
+    const result: OperationParams = {};
+    
+    for (const key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        // Convert camelCase to snake_case
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        
+        // Handle nested objects recursively
+        if (typeof params[key] === 'object' && params[key] !== null && !Array.isArray(params[key])) {
+          result[snakeKey] = this.convertCamelToSnakeCase(params[key] as OperationParams);
+        } else {
+          result[snakeKey] = params[key];
+        }
+      }
+    }
+    
+    return result;
+  }
+
+  /**
    * Execute a Godot operation using the operations script
    * @param operation The operation to execute
    * @param params The parameters for the operation
@@ -405,7 +430,12 @@ class GodotServer {
     projectPath: string
   ): Promise<{ stdout: string; stderr: string }> {
     this.logDebug(`Executing operation: ${operation} in project: ${projectPath}`);
-    this.logDebug(`Operation params: ${JSON.stringify(params)}`);
+    this.logDebug(`Original operation params: ${JSON.stringify(params)}`);
+
+    // Convert camelCase parameters to snake_case for Godot script
+    const snakeCaseParams = this.convertCamelToSnakeCase(params);
+    this.logDebug(`Converted snake_case params: ${JSON.stringify(snakeCaseParams)}`);
+
 
     // Ensure godotPath is set
     if (!this.godotPath) {
@@ -417,7 +447,8 @@ class GodotServer {
 
     try {
       // Escape single quotes in the JSON string to prevent command injection
-      const escapedParams = JSON.stringify(params).replace(/'/g, "'\\''");
+      const escapedParams = JSON.stringify(snakeCaseParams).replace(/'/g, "'\\''");
+
 
       // Add debug arguments if debug mode is enabled
       const debugArgs = GODOT_DEBUG_MODE ? ['--debug-godot'] : [];
@@ -1601,11 +1632,11 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (using camelCase)
       const params = {
-        scene_path: args.scenePath,
-        node_path: args.nodePath,
-        texture_path: args.texturePath,
+        scenePath: args.scenePath,
+        nodePath: args.nodePath,
+        texturePath: args.texturePath,
       };
 
       // Execute the operation
@@ -1689,15 +1720,15 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (using camelCase)
       const params: any = {
-        scene_path: args.scenePath,
-        output_path: args.outputPath,
+        scenePath: args.scenePath,
+        outputPath: args.outputPath,
       };
 
       // Add optional parameters
       if (args.meshItemNames && Array.isArray(args.meshItemNames)) {
-        params.mesh_item_names = args.meshItemNames;
+        params.meshItemNames = args.meshItemNames;
       }
 
       // Execute the operation
@@ -1785,14 +1816,14 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (using camelCase)
       const params: any = {
-        scene_path: args.scenePath,
+        scenePath: args.scenePath,
       };
 
       // Add optional parameters
       if (args.newPath) {
-        params.new_path = args.newPath;
+        params.newPath = args.newPath;
       }
 
       // Execute the operation
@@ -1898,9 +1929,9 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (using camelCase)
       const params = {
-        file_path: args.filePath,
+        filePath: args.filePath,
       };
 
       // Execute the operation
@@ -1995,9 +2026,9 @@ class GodotServer {
         );
       }
 
-      // Prepare parameters for the operation
+      // Prepare parameters for the operation (using camelCase)
       const params = {
-        project_path: args.projectPath,
+        projectPath: args.projectPath,
       };
 
       // Execute the operation
