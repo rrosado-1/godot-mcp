@@ -494,8 +494,8 @@ class GodotServer {
     try {
       // Serialize the snake_case parameters to a valid JSON string
       const paramsJson = JSON.stringify(snakeCaseParams);
-      // Escape single quotes in the JSON string to prevent command injection
-      const escapedParams = paramsJson.replace(/'/g, "'\\''");
+      // Escape double quotes in the JSON string for command line
+      const escapedParams = paramsJson.replace(/"/g, '\\"');
 
 
       // Add debug arguments if debug mode is enabled
@@ -510,7 +510,7 @@ class GodotServer {
         '--script',
         `"${this.operationsScriptPath}"`,
         operation,
-        `'${escapedParams}'`,  // Pass the JSON string as a single argument
+        `"${escapedParams}"`,  // Pass the JSON string as a single argument with double quotes
         ...debugArgs,
       ].join(' ');
 
