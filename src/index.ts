@@ -301,7 +301,8 @@ class GodotServer {
         '/Applications/Godot.app/Contents/MacOS/Godot',
         '/Applications/Godot_4.app/Contents/MacOS/Godot',
         `${process.env.HOME}/Applications/Godot.app/Contents/MacOS/Godot`,
-        `${process.env.HOME}/Applications/Godot_4.app/Contents/MacOS/Godot`
+        `${process.env.HOME}/Applications/Godot_4.app/Contents/MacOS/Godot`,
+        `${process.env.HOME}/Library/Application Support/Steam/steamapps/common/Godot Engine/Godot.app/Contents/MacOS/Godot`
       );
     } else if (osPlatform === 'win32') {
       possiblePaths.push(
