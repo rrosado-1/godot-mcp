@@ -167,7 +167,7 @@ class GodotServer {
    */
   private logDebug(message: string): void {
     if (DEBUG_MODE) {
-      console.debug(`[DEBUG] ${message}`);
+      console.error(`[DEBUG] ${message}`);
     }
   }
 
@@ -415,18 +415,18 @@ class GodotServer {
     if (!params || typeof params !== 'object') {
       return params;
     }
-    
+
     const result: OperationParams = {};
-    
+
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
         let normalizedKey = key;
-        
+
         // If the key is in snake_case, convert it to camelCase using our mapping
         if (key.includes('_') && this.parameterMappings[key]) {
           normalizedKey = this.parameterMappings[key];
         }
-        
+
         // Handle nested objects recursively
         if (typeof params[key] === 'object' && params[key] !== null && !Array.isArray(params[key])) {
           result[normalizedKey] = this.normalizeParameters(params[key] as OperationParams);
@@ -435,7 +435,7 @@ class GodotServer {
         }
       }
     }
-    
+
     return result;
   }
 
@@ -446,12 +446,12 @@ class GodotServer {
    */
   private convertCamelToSnakeCase(params: OperationParams): OperationParams {
     const result: OperationParams = {};
-    
+
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
         // Convert camelCase to snake_case
         const snakeKey = this.reverseParameterMappings[key] || key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-        
+
         // Handle nested objects recursively
         if (typeof params[key] === 'object' && params[key] !== null && !Array.isArray(params[key])) {
           result[snakeKey] = this.convertCamelToSnakeCase(params[key] as OperationParams);
@@ -460,7 +460,7 @@ class GodotServer {
         }
       }
     }
-    
+
     return result;
   }
 
@@ -975,7 +975,7 @@ class GodotServer {
   private async handleLaunchEditor(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -1054,7 +1054,7 @@ class GodotServer {
   private async handleRunProject(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -1268,7 +1268,7 @@ class GodotServer {
   private async handleListProjects(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.directory) {
       return this.createErrorResponse(
         'Directory is required',
@@ -1331,22 +1331,22 @@ class GodotServer {
 
         const scanDirectory = (currentPath: string) => {
           const entries = readdirSync(currentPath, { withFileTypes: true });
-          
+
           for (const entry of entries) {
             const entryPath = join(currentPath, entry.name);
-            
+
             // Skip hidden files and directories
             if (entry.name.startsWith('.')) {
               continue;
             }
-            
+
             if (entry.isDirectory()) {
               // Recursively scan subdirectories
               scanDirectory(entryPath);
             } else if (entry.isFile()) {
               // Count file by extension
               const ext = entry.name.split('.').pop()?.toLowerCase();
-              
+
               if (ext === 'tscn') {
                 structure.scenes++;
               } else if (ext === 'gd' || ext === 'gdscript' || ext === 'cs') {
@@ -1359,13 +1359,13 @@ class GodotServer {
             }
           }
         };
-        
+
         // Start scanning from the project root
         scanDirectory(projectPath);
         resolve(structure);
       } catch (error) {
         this.logDebug(`Error getting project structure asynchronously: ${error}`);
-        resolve({ 
+        resolve({
           error: 'Failed to get project structure',
           scenes: 0,
           scripts: 0,
@@ -1382,21 +1382,21 @@ class GodotServer {
   private async handleGetProjectInfo(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
         ['Provide a valid path to a Godot project directory']
       );
     }
-  
+
     if (!this.validatePath(args.projectPath)) {
       return this.createErrorResponse(
         'Invalid project path',
         ['Provide a valid path without ".." or other potentially unsafe characters']
       );
     }
-  
+
     try {
       // Ensure godotPath is set
       if (!this.godotPath) {
@@ -1411,7 +1411,7 @@ class GodotServer {
           );
         }
       }
-  
+
       // Check if the project directory exists and contains a project.godot file
       const projectFile = join(args.projectPath, 'project.godot');
       if (!existsSync(projectFile)) {
@@ -1423,16 +1423,16 @@ class GodotServer {
           ]
         );
       }
-  
+
       this.logDebug(`Getting project info for: ${args.projectPath}`);
-  
+
       // Get Godot version
       const execOptions = { timeout: 10000 }; // 10 second timeout
       const { stdout } = await execAsync(`"${this.godotPath}" --version`, execOptions);
-  
+
       // Get project structure using the recursive method
       const projectStructure = await this.getProjectStructureAsync(args.projectPath);
-  
+
       // Extract project name from project.godot file
       let projectName = basename(args.projectPath);
       try {
@@ -1447,7 +1447,7 @@ class GodotServer {
         this.logDebug(`Error reading project file: ${error}`);
         // Continue with default project name if extraction fails
       }
-  
+
       return {
         content: [
           {
@@ -1483,7 +1483,7 @@ class GodotServer {
   private async handleCreateScene(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.scenePath) {
       return this.createErrorResponse(
         'Project path and scene path are required',
@@ -1557,7 +1557,7 @@ class GodotServer {
   private async handleAddNode(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.scenePath || !args.nodeType || !args.nodeName) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1653,7 +1653,7 @@ class GodotServer {
   private async handleLoadSprite(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.scenePath || !args.nodePath || !args.texturePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1757,7 +1757,7 @@ class GodotServer {
   private async handleExportMeshLibrary(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.scenePath || !args.outputPath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1852,7 +1852,7 @@ class GodotServer {
   private async handleSaveScene(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.scenePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -1951,7 +1951,7 @@ class GodotServer {
   private async handleGetUid(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath || !args.filePath) {
       return this.createErrorResponse(
         'Missing required parameters',
@@ -2060,7 +2060,7 @@ class GodotServer {
   private async handleUpdateProjectUids(args: any) {
     // Normalize parameters to camelCase
     args = this.normalizeParameters(args);
-    
+
     if (!args.projectPath) {
       return this.createErrorResponse(
         'Project path is required',
@@ -2185,7 +2185,7 @@ class GodotServer {
         }
       }
 
-      console.log(`[SERVER] Using Godot at: ${this.godotPath}`);
+      console.error(`[SERVER] Using Godot at: ${this.godotPath}`);
 
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
